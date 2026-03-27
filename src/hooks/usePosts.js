@@ -2,37 +2,51 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchPosts, subscribeToPosts, fetchEncryptedBlob } from "../lib/api";
 import { decryptText, decryptFileToUrl } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
+import { cachePlaintext, loadCachedPlaintext, deleteCachedPlaintext } from "../lib/plaintextCache";
 
 export function usePosts(encryptionReady) {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [posts, setPosts]           = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
   const [newPostAlert, setNewPostAlert] = useState(false);
-  const mediaCache = useRef({});
-  const mountedRef = useRef(true);
-  const isFirstLoad = useRef(true);
+  const mediaCache   = useRef({});
+  const mountedRef   = useRef(true);
+  const isFirstLoad  = useRef(true);
+  const prevCount    = useRef(0);
 
   const decryptPost = useCallback(async (post) => {
     const keys = getSessionKeys();
-    if (!keys?.sharedAesKey) return post;
-
     const decrypted = { ...post, _plainContent: null, _mediaObjectUrl: null };
 
+    // ── Text content ──────────────────────────────────────────────────────
     if (post.content && post.content_iv) {
-      try {
-        decrypted._plainContent = await decryptText(post.content, post.content_iv, keys.sharedAesKey);
-      } catch {
-        decrypted._plainContent = "[could not decrypt]";
+      // 1. Try live decryption first (keys in memory)
+      if (keys?.sharedAesKey) {
+        try {
+          const plain = await decryptText(post.content, post.content_iv, keys.sharedAesKey);
+          decrypted._plainContent = plain;
+          // Cache it for future logins
+          await cachePlaintext(post.id, plain);
+        } catch {
+          // 2. Fall back to cached plaintext
+          const cached = await loadCachedPlaintext(post.id);
+          decrypted._plainContent = cached ?? "[could not decrypt]";
+        }
+      } else {
+        // No keys in memory — use cache only
+        const cached = await loadCachedPlaintext(post.id);
+        decrypted._plainContent = cached ?? "[could not decrypt]";
       }
     }
 
+    // ── Media ─────────────────────────────────────────────────────────────
     if (post.media_url && post.media_iv && post.media_mime) {
-      const cached = mediaCache.current[post.id];
-      if (cached) {
-        decrypted._mediaObjectUrl = cached;
-      } else {
+      const inMemory = mediaCache.current[post.id];
+      if (inMemory) {
+        decrypted._mediaObjectUrl = inMemory;
+      } else if (keys?.sharedAesKey) {
         try {
-          const encBlob = await fetchEncryptedBlob(post.media_url);
+          const encBlob  = await fetchEncryptedBlob(post.media_url);
           const objectUrl = await decryptFileToUrl(encBlob, post.media_iv, keys.sharedAesKey, post.media_mime);
           mediaCache.current[post.id] = objectUrl;
           decrypted._mediaObjectUrl = objectUrl;
@@ -51,15 +65,15 @@ export function usePosts(encryptionReady) {
     try {
       const raw = await fetchPosts();
       const decryptedPosts = await Promise.all(raw.map(decryptPost));
+
       if (mountedRef.current) {
-        setPosts(prev => {
-          // If background refresh and there are new posts, show alert
-          if (isBackground && !isFirstLoad.current && raw.length > prev.length) {
-            setNewPostAlert(true);
-          }
-          return decryptedPosts;
-        });
+        // Show new-post alert when a background refresh brings new posts
+        if (isBackground && !isFirstLoad.current && raw.length > prevCount.current) {
+          setNewPostAlert(true);
+        }
+        prevCount.current = raw.length;
         isFirstLoad.current = false;
+        setPosts(decryptedPosts);
       }
     } catch (err) {
       if (mountedRef.current) setError(err.message ?? "Failed to load posts.");
@@ -70,12 +84,8 @@ export function usePosts(encryptionReady) {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (encryptionReady) {
-      setLoading(true);
-      refresh(false);
-    }
+    if (encryptionReady) { setLoading(true); refresh(false); }
 
-    // Real-time subscription — auto-refresh instantly when any change happens
     const unsubscribe = subscribeToPosts(() => {
       if (mountedRef.current && encryptionReady) refresh(true);
     });
@@ -83,12 +93,17 @@ export function usePosts(encryptionReady) {
     return () => {
       mountedRef.current = false;
       unsubscribe();
-      Object.values(mediaCache.current).forEach((url) => {
-        try { URL.revokeObjectURL(url); } catch {}
-      });
+      Object.values(mediaCache.current).forEach(url => { try { URL.revokeObjectURL(url); } catch {} });
       mediaCache.current = {};
     };
   }, [refresh, encryptionReady]);
 
-  return { posts, loading, error, refresh: () => refresh(false), newPostAlert, clearAlert: () => setNewPostAlert(false) };
+  return {
+    posts,
+    loading,
+    error,
+    refresh: () => refresh(false),
+    newPostAlert,
+    clearAlert: () => setNewPostAlert(false),
+  };
 }

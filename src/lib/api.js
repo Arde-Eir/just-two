@@ -63,6 +63,35 @@ export async function fetchOtherUserPublicKey(myUserId) {
   return data ?? null;
 }
 
+// ── Encrypted Private Key Backup ───────────────────────────────────────────
+// Stores the password-encrypted private key in Supabase so it can be
+// restored on any device. Safe because it's encrypted with the user's
+// local password before upload — Supabase cannot decrypt it.
+
+export async function backupEncryptedPrivateKey(userId, bundle) {
+  const { error } = await supabase
+    .from("user_key_backups")
+    .upsert({
+      user_id:    userId,
+      cipher_b64: bundle.cipherB64,
+      iv_b64:     bundle.ivB64,
+      salt_b64:   bundle.saltB64,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+  if (error) throw error;
+}
+
+export async function fetchEncryptedPrivateKeyBackup(userId) {
+  const { data, error } = await supabase
+    .from("user_key_backups")
+    .select("cipher_b64, iv_b64, salt_b64")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return { cipherB64: data.cipher_b64, ivB64: data.iv_b64, saltB64: data.salt_b64 };
+}
+
 // ── Posts ──────────────────────────────────────────────────────────────────
 
 export async function fetchPosts() {
@@ -75,35 +104,18 @@ export async function fetchPosts() {
   return data ?? [];
 }
 
-export async function uploadKeyBackup(userId, encryptedBundle) {
-  const { error } = await supabase
-    .from("user_key_backups")
-    .upsert({ user_id: userId, encrypted_priv_key: encryptedBundle });
-  if (error) throw error;
-}
-
-export async function downloadKeyBackup(userId) {
-  const { data, error } = await supabase
-    .from("user_key_backups")
-    .select("encrypted_priv_key")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw error;
-  return data?.encrypted_priv_key;
-}
-
 export async function createPost({ userId, userEmail, encryptedContent, contentIv, mediaUrl, mediaIv, mediaMime, mediaType }) {
   const { data, error } = await supabase
     .from("posts")
     .insert({
-      user_id: userId,
-      user_email: userEmail,
-      content: encryptedContent ?? null,
-      content_iv: contentIv ?? null,
-      media_url: mediaUrl ?? null,
-      media_iv: mediaIv ?? null,
-      media_mime: mediaMime ?? null,
-      media_type: mediaType ?? null,
+      user_id:     userId,
+      user_email:  userEmail,
+      content:     encryptedContent ?? null,
+      content_iv:  contentIv ?? null,
+      media_url:   mediaUrl ?? null,
+      media_iv:    mediaIv ?? null,
+      media_mime:  mediaMime ?? null,
+      media_type:  mediaType ?? null,
       likes: [],
     })
     .select()
@@ -119,8 +131,8 @@ export async function deletePost(postId) {
 
 export async function toggleLike(postId, currentLikes, userId) {
   const safeLikes = Array.isArray(currentLikes) ? currentLikes : [];
-  const already = safeLikes.includes(userId);
-  const updated = already ? safeLikes.filter((id) => id !== userId) : [...safeLikes, userId];
+  const already   = safeLikes.includes(userId);
+  const updated   = already ? safeLikes.filter(id => id !== userId) : [...safeLikes, userId];
   const { data, error } = await supabase
     .from("posts")
     .update({ likes: updated })
@@ -146,13 +158,7 @@ export async function fetchComments(postId) {
 export async function createComment({ postId, userId, userEmail, encryptedContent, contentIv }) {
   const { data, error } = await supabase
     .from("comments")
-    .insert({
-      post_id: postId,
-      user_id: userId,
-      user_email: userEmail,
-      content: encryptedContent,
-      content_iv: contentIv,
-    })
+    .insert({ post_id: postId, user_id: userId, user_email: userEmail, content: encryptedContent, content_iv: contentIv })
     .select()
     .single();
   if (error) throw error;
@@ -193,10 +199,9 @@ export async function deleteMedia(publicUrl) {
   if (!publicUrl) return;
   try {
     const marker = `/${MEDIA_BUCKET}/`;
-    const idx = publicUrl.indexOf(marker);
+    const idx    = publicUrl.indexOf(marker);
     if (idx === -1) return;
-    const path = publicUrl.slice(idx + marker.length);
-    await supabase.storage.from(MEDIA_BUCKET).remove([path]);
+    await supabase.storage.from(MEDIA_BUCKET).remove([publicUrl.slice(idx + marker.length)]);
   } catch (err) {
     console.warn("[deleteMedia] Storage cleanup failed:", err.message);
   }
