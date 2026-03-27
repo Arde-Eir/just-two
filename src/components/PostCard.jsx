@@ -197,6 +197,7 @@ export function PostCard({ post, currentUser, onRefresh }) {
   const liked = safeLikes.includes(currentUser.id);
   const displayContent = post._plainContent;
   const mediaUrl = post._mediaObjectUrl;
+  const [isMaximized, setIsMaximized] = useState(false);
 
   async function handleLike() {
     if (likeLoading) return;
@@ -243,22 +244,29 @@ export function PostCard({ post, currentUser, onRefresh }) {
       {displayContent && <p style={s.content}>{displayContent}</p>}
 
       {mediaUrl && post.media_type === "image" && (
-        <div style={s.mediaWrap}>
-          <img src={mediaUrl} alt="Post attachment" style={s.media} loading="lazy"
-            onError={e => { e.target.style.display = "none"; }} />
-        </div>
-      )}
+  <div style={s.mediaWrap} onClick={() => setIsMaximized(true)}>
+    <img src={mediaUrl} alt="Post attachment" style={{...s.media, cursor: 'zoom-in'}} />
+  </div>
+)}
 
       {mediaUrl && post.media_type === "video" && (
-        <div style={s.mediaWrap}>
-          <VideoPlayer 
-            url={mediaUrl} 
-            mimeType={post.media_mime} 
-            postId={post.id} 
-          />
-        </div>
-      )}
+  <div style={s.mediaWrap}>
+    <VideoPlayer 
+      url={mediaUrl} 
+      mimeType={post.media_mime} 
+      postId={post.id} 
+      // We'll update VideoPlayer to accept a custom style if needed
+    />
+  </div>
+)}
 
+{/* Simple Fullscreen Overlay */}
+{isMaximized && (
+  <div style={s.overlay} onClick={() => setIsMaximized(false)}>
+    <img src={mediaUrl} style={s.maximizedImage} />
+    <button style={s.closeBtn}>✕</button>
+  </div>
+)}
       <ErrorBanner message={error} onDismiss={() => setError("")} />
 
       <div style={s.footer}>
