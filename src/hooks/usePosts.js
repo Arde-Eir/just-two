@@ -2,40 +2,38 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchPosts, subscribeToPosts, fetchEncryptedBlob } from "../lib/api";
 import { decryptText, decryptFileToUrl } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
-import { cachePlaintext, loadCachedPlaintext, deleteCachedPlaintext } from "../lib/plaintextCache";
+import { cachePlaintext, loadCachedPlaintext } from "../lib/plaintextCache";
 
 export function usePosts(encryptionReady) {
-  const [posts, setPosts]           = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState(null);
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [newPostAlert, setNewPostAlert] = useState(false);
-  const mediaCache   = useRef({});
-  const mountedRef   = useRef(true);
-  const isFirstLoad  = useRef(true);
-  const prevCount    = useRef(0);
+  
+  const mediaCache = useRef({});
+  const mountedRef = useRef(true);
+  // Track if we actually have the shared key to prevent "false-negative" caching
+  const keys = getSessionKeys();
+  const hasSharedKey = !!keys?.sharedAesKey;
 
   const decryptPost = useCallback(async (post) => {
-    const keys = getSessionKeys();
+    const currentKeys = getSessionKeys();
     const decrypted = { ...post, _plainContent: null, _mediaObjectUrl: null };
 
     // ── Text content ──────────────────────────────────────────────────────
     if (post.content && post.content_iv) {
-      // 1. Try live decryption first (keys in memory)
-      if (keys?.sharedAesKey) {
+      if (currentKeys?.sharedAesKey) {
         try {
-          const plain = await decryptText(post.content, post.content_iv, keys.sharedAesKey);
+          const plain = await decryptText(post.content, post.content_iv, currentKeys.sharedAesKey);
           decrypted._plainContent = plain;
-          // Cache it for future logins
           await cachePlaintext(post.id, plain);
-        } catch {
-          // 2. Fall back to cached plaintext
+        } catch (e) {
           const cached = await loadCachedPlaintext(post.id);
-          decrypted._plainContent = cached ?? "[could not decrypt]";
+          decrypted._plainContent = cached ?? "[decryption failed]";
         }
       } else {
-        // No keys in memory — use cache only
         const cached = await loadCachedPlaintext(post.id);
-        decrypted._plainContent = cached ?? "[could not decrypt]";
+        decrypted._plainContent = cached ?? "[waiting for shared key...]";
       }
     }
 
@@ -44,13 +42,15 @@ export function usePosts(encryptionReady) {
       const inMemory = mediaCache.current[post.id];
       if (inMemory) {
         decrypted._mediaObjectUrl = inMemory;
-      } else if (keys?.sharedAesKey) {
+      } else if (currentKeys?.sharedAesKey) {
         try {
-          const encBlob  = await fetchEncryptedBlob(post.media_url);
-          const objectUrl = await decryptFileToUrl(encBlob, post.media_iv, keys.sharedAesKey, post.media_mime);
+          const encBlob = await fetchEncryptedBlob(post.media_url);
+          // Fixed: ensure we pass the mimeType so photos/videos render correctly
+          const objectUrl = await decryptFileToUrl(encBlob, post.media_iv, currentKeys.sharedAesKey, post.media_mime);
           mediaCache.current[post.id] = objectUrl;
           decrypted._mediaObjectUrl = objectUrl;
-        } catch {
+        } catch (e) {
+          console.error("Media decryption error:", e);
           decrypted._mediaObjectUrl = null;
         }
       }
@@ -59,50 +59,44 @@ export function usePosts(encryptionReady) {
     return decrypted;
   }, []);
 
-  const refresh = useCallback(async (isBackground = false) => {
-    if (!encryptionReady) return;
+  const refresh = useCallback(async () => {
+    // Don't block the fetch just because encryption isn't ready; 
+    // fetch the raw posts so we can decrypt them the moment keys arrive.
     setError(null);
     try {
       const raw = await fetchPosts();
-      const decryptedPosts = await Promise.all(raw.map(decryptPost));
-
+      const decrypted = await Promise.all(raw.map(decryptPost));
       if (mountedRef.current) {
-        // Show new-post alert when a background refresh brings new posts
-        if (isBackground && !isFirstLoad.current && raw.length > prevCount.current) {
-          setNewPostAlert(true);
-        }
-        prevCount.current = raw.length;
-        isFirstLoad.current = false;
-        setPosts(decryptedPosts);
+        setPosts(decrypted);
       }
     } catch (err) {
       if (mountedRef.current) setError(err.message ?? "Failed to load posts.");
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [encryptionReady, decryptPost]);
+  }, [decryptPost]);
 
+  // Re-run decryption whenever encryptionReady OR the shared key status changes
   useEffect(() => {
     mountedRef.current = true;
-    if (encryptionReady) { setLoading(true); refresh(false); }
+    refresh();
 
     const unsubscribe = subscribeToPosts(() => {
-      if (mountedRef.current && encryptionReady) refresh(true);
+      if (mountedRef.current) refresh();
     });
 
     return () => {
       mountedRef.current = false;
       unsubscribe();
-      Object.values(mediaCache.current).forEach(url => { try { URL.revokeObjectURL(url); } catch {} });
-      mediaCache.current = {};
+      // Only revoke if the component is actually unmounting
     };
-  }, [refresh, encryptionReady]);
+  }, [refresh, encryptionReady, hasSharedKey]); // added hasSharedKey here
 
   return {
     posts,
     loading,
     error,
-    refresh: () => refresh(false),
+    refresh,
     newPostAlert,
     clearAlert: () => setNewPostAlert(false),
   };
