@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { deletePost, deleteMedia, toggleLike, fetchComments, createComment, deleteComment, subscribeToComments } from "../lib/api";
 import { encryptText, decryptText } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
@@ -40,7 +40,7 @@ function VideoPlayer({ url, mimeType, postId }) {
 
   return (
     <video
-      key={postId}
+      key={url} // Fix: forces reload on Desktop when URL changes
       controls
       playsInline
       webkit-playsinline="true"
@@ -198,6 +198,21 @@ export function PostCard({ post, currentUser, onRefresh }) {
   const displayContent = post._plainContent;
   const mediaUrl = post._mediaObjectUrl;
 
+  // Esc key listener for Desktop Fullscreen
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') setIsMaximized(false);
+    };
+    if (isMaximized) {
+      window.addEventListener('keydown', handleEsc);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      window.removeEventListener('keydown', handleEsc);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isMaximized]);
+
   async function handleLike() {
     if (likeLoading) return;
     setLikeLoading(true);
@@ -221,44 +236,8 @@ export function PostCard({ post, currentUser, onRefresh }) {
   }
 
   return (
-    <article style={s.card} className="fade-up">
-      <div style={s.header}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Avatar email={post.user_email} size={36} />
-          <div>
-            <p style={s.email}>{post.user_email}</p>
-            <time style={s.time} dateTime={post.created_at} title={new Date(post.created_at).toLocaleString()}>
-              {timeAgo(post.created_at)}
-            </time>
-          </div>
-        </div>
-        {isOwn && (
-          <Button variant={confirmDelete ? "danger" : "icon"} size="sm" onClick={handleDelete}
-            loading={deleteLoading} title={confirmDelete ? "Click again to confirm" : "Delete"}>
-            {confirmDelete ? <span style={{ fontSize: 12 }}>confirm?</span> : <TrashIcon />}
-          </Button>
-        )}
-      </div>
-
-      {displayContent ? (
-        <p style={s.content}>{displayContent}</p>
-      ) : !post.media_url ? (
-        <p style={{...s.content, color: 'var(--color-text-3)', fontStyle: 'italic'}}>[locked or empty]</p>
-      ) : null}
-
-      {mediaUrl && post.media_type === "image" && (
-        <div style={s.mediaWrap} onClick={() => setIsMaximized(true)}>
-          <img src={mediaUrl} alt="Post attachment" style={{...s.media, cursor: 'zoom-in'}} loading="lazy" />
-        </div>
-      )}
-
-      {mediaUrl && post.media_type === "video" && (
-        <div style={s.mediaWrap}>
-          <VideoPlayer url={mediaUrl} mimeType={post.media_mime} postId={post.id} />
-        </div>
-      )}
-
-      {/* Fullscreen Modal Overlay */}
+    <>
+      {/* Fullscreen Modal Overlay (Moved outside card to avoid container trapping) */}
       {isMaximized && (
         <div style={s.overlay} onClick={() => setIsMaximized(false)}>
           <img src={mediaUrl} style={s.maximizedImage} alt="Fullscreen view" />
@@ -266,28 +245,66 @@ export function PostCard({ post, currentUser, onRefresh }) {
         </div>
       )}
 
-      <ErrorBanner message={error} onDismiss={() => setError("")} />
-
-      <div style={s.footer}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <button onClick={handleLike} disabled={likeLoading} aria-pressed={liked}
-            style={{ ...s.actionBtn, color: liked ? "var(--color-like-active)" : "var(--color-text-3)" }}>
-            <HeartIcon filled={liked} />
-            <span style={{ fontSize: 13 }}>{safeLikes.length > 0 ? safeLikes.length : ""}</span>
-          </button>
-          <button onClick={() => setShowComments(v => !v)}
-            style={{ ...s.actionBtn, color: showComments ? "var(--color-accent)" : "var(--color-text-3)", marginLeft: 4 }}>
-            <CommentIcon />
-            <span style={{ fontSize: 13 }}>{showComments ? "hide" : "comment"}</span>
-          </button>
+      <article style={s.card} className="fade-up">
+        <div style={s.header}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Avatar email={post.user_email} size={36} />
+            <div>
+              <p style={s.email}>{post.user_email}</p>
+              <time style={s.time} dateTime={post.created_at} title={new Date(post.created_at).toLocaleString()}>
+                {timeAgo(post.created_at)}
+              </time>
+            </div>
+          </div>
+          {isOwn && (
+            <Button variant={confirmDelete ? "danger" : "icon"} size="sm" onClick={handleDelete}
+              loading={deleteLoading} title={confirmDelete ? "Click again to confirm" : "Delete"}>
+              {confirmDelete ? <span style={{ fontSize: 12 }}>confirm?</span> : <TrashIcon />}
+            </Button>
+          )}
         </div>
-        <span style={s.encBadge}>🔒 e2e encrypted</span>
-      </div>
 
-      {showComments && (
-        <CommentSection postId={post.id} currentUser={currentUser} />
-      )}
-    </article>
+        {displayContent ? (
+          <p style={s.content}>{displayContent}</p>
+        ) : !post.media_url ? (
+          <p style={{...s.content, color: 'var(--color-text-3)', fontStyle: 'italic'}}>[locked or empty]</p>
+        ) : null}
+
+        {mediaUrl && post.media_type === "image" && (
+          <div style={s.mediaWrap} onClick={() => setIsMaximized(true)}>
+            <img src={mediaUrl} alt="Post attachment" style={{...s.media, cursor: 'zoom-in'}} loading="lazy" />
+          </div>
+        )}
+
+        {mediaUrl && post.media_type === "video" && (
+          <div style={s.mediaWrap}>
+            <VideoPlayer url={mediaUrl} mimeType={post.media_mime} postId={post.id} />
+          </div>
+        )}
+
+        <ErrorBanner message={error} onDismiss={() => setError("")} />
+
+        <div style={s.footer}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button onClick={handleLike} disabled={likeLoading} aria-pressed={liked}
+              style={{ ...s.actionBtn, color: liked ? "var(--color-like-active)" : "var(--color-text-3)" }}>
+              <HeartIcon filled={liked} />
+              <span style={{ fontSize: 13 }}>{safeLikes.length > 0 ? safeLikes.length : ""}</span>
+            </button>
+            <button onClick={() => setShowComments(v => !v)}
+              style={{ ...s.actionBtn, color: showComments ? "var(--color-accent)" : "var(--color-text-3)", marginLeft: 4 }}>
+              <CommentIcon />
+              <span style={{ fontSize: 13 }}>{showComments ? "hide" : "comment"}</span>
+            </button>
+          </div>
+          <span style={s.encBadge}>🔒 e2e encrypted</span>
+        </div>
+
+        {showComments && (
+          <CommentSection postId={post.id} currentUser={currentUser} />
+        )}
+      </article>
+    </>
   );
 }
 
@@ -298,33 +315,34 @@ const s = {
   time: { fontSize: 12, color: "var(--color-text-3)", display: "block", marginTop: 2 },
   content: { fontSize: 15, fontFamily: "var(--font-display)", lineHeight: 1.7, color: "var(--color-text-1)", margin: "0 0 12px", whiteSpace: "pre-wrap", wordBreak: "break-word" },
   mediaWrap: { borderRadius: "var(--radius-md)", overflow: "hidden", border: "0.5px solid var(--color-border)", marginBottom: 10, background: "var(--color-surface-2)" },
-  media: { width: "100%", maxHeight: 400, display: "block", objectFit: 'contain' },
+  media: { width: "100%", maxHeight: 500, display: "block", objectFit: 'cover' },
   footer: { display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8, borderTop: "0.5px solid var(--color-border)" },
   actionBtn: { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)", fontSize: 13 },
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
 
   // Fullscreen Overlay
   overlay: { 
-  position: 'fixed', 
-  top: 0, 
-  left: 0, 
-  width: '100vw', 
-  height: '100vh', 
-  backgroundColor: 'rgba(0,0,0,0.95)', // Darker for better focus
-  zIndex: 9999, // Ensure it sits above the Header and ComposeBox
-  display: 'flex', 
-  alignItems: 'center', 
-  justifyContent: 'center', 
-  cursor: 'zoom-out' 
-},
-maximizedImage: { 
-  maxWidth: '90%', 
-  maxHeight: '90%', 
-  borderRadius: 'var(--radius-md)', 
-  boxShadow: '0 0 40px rgba(0,0,0,0.7)', 
-  objectFit: 'contain',
-  userSelect: 'none' // Prevents accidental dragging while clicking to close
-},
+    position: 'fixed', 
+    top: 0, 
+    left: 0, 
+    width: '100vw', 
+    height: '100vh', 
+    backgroundColor: 'rgba(0,0,0,0.96)', 
+    zIndex: 99999, 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    cursor: 'zoom-out',
+    margin: 0,
+    padding: 0
+  },
+  maximizedImage: { 
+    maxWidth: '100%', 
+    maxHeight: '100%', 
+    objectFit: 'contain',
+    userSelect: 'none',
+    boxShadow: '0 0 50px rgba(0,0,0,0.5)'
+  },
   closeBtn: { position: 'absolute', top: 24, right: 24, background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', borderRadius: '50%', width: 36, height: 36, fontSize: 18, cursor: 'pointer', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
   // Comments
