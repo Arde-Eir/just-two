@@ -28,6 +28,32 @@ const CommentIcon = () => (
   </svg>
 );
 
+// ── Video Player Component ───────────────────────────────────────────────
+function VideoPlayer({ url, mimeType, postId }) {
+  const [videoSrc, setVideoSrc] = useState(null);
+
+  useEffect(() => {
+    if (url) {
+      setVideoSrc(url);
+    }
+  }, [url]);
+
+  if (!videoSrc) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-3)', fontSize: 12 }}>decrypting video...</div>;
+
+  return (
+    <video
+      key={postId}
+      controls
+      playsInline
+      style={s.media}
+      preload="metadata"
+    >
+      <source src={videoSrc} type={mimeType || "video/mp4"} />
+      Your browser does not support the video tag.
+    </video>
+  );
+}
+
 // ── Comment Item ──────────────────────────────────────────────────────────
 function CommentItem({ comment, currentUser, onDelete }) {
   const isOwn = comment.user_id === currentUser.id;
@@ -225,16 +251,11 @@ export function PostCard({ post, currentUser, onRefresh }) {
 
       {mediaUrl && post.media_type === "video" && (
         <div style={s.mediaWrap}>
-          <video
-            key={mediaUrl}
-            controls
-            playsInline
-            style={s.media}
-            preload="metadata"
-          >
-            <source src={mediaUrl} type={post.media_mime || "video/mp4"} />
-            Your browser does not support the video tag.
-          </video>
+          <VideoPlayer 
+            url={mediaUrl} 
+            mimeType={post.media_mime} 
+            postId={post.id} 
+          />
         </div>
       )}
 

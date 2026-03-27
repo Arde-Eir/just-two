@@ -77,12 +77,18 @@ export function ComposeBox({ user, onPost }) {
       setProgress(30);
 
       let mediaUrl = null, mediaIv = null, mediaMime = null, mediaType = null;
-      if (file) {
-        const { encryptedBlob, ivB64 } = await encryptFile(file, keys.sharedAesKey);
-        setProgress(60);
-        const { publicUrl } = await uploadEncryptedBlob(user.id, encryptedBlob, file.name);
-        mediaUrl = publicUrl; mediaIv = ivB64; mediaMime = file.type; mediaType = fileType;
-      }
+      // Inside handleSubmit, where you handle the file upload:
+if (file) {
+  const { encryptedBlob, ivB64 } = await encryptFile(file, keys.sharedAesKey);
+  setProgress(60);
+  const { publicUrl } = await uploadEncryptedBlob(user.id, encryptedBlob, file.name);
+  
+  mediaUrl = publicUrl;
+  mediaIv = ivB64;
+  // Ensure we have a valid MIME type, fallback to video/mp4 if it's a video but type is missing
+  mediaMime = file.type || (fileType === "video" ? "video/mp4" : "image/jpeg"); 
+  mediaType = fileType;
+}
       setProgress(85);
 
       await createPost({ userId: user.id, userEmail: user.email, encryptedContent, contentIv, mediaUrl, mediaIv, mediaMime, mediaType });
