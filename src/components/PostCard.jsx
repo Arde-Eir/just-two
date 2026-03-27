@@ -304,8 +304,27 @@ const s = {
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
 
   // Fullscreen Overlay
-  overlay: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.92)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' },
-  maximizedImage: { maxWidth: '95%', maxHeight: '95%', borderRadius: 'var(--radius-md)', boxShadow: '0 0 30px rgba(0,0,0,0.5)', objectFit: 'contain' },
+  overlay: { 
+  position: 'fixed', 
+  top: 0, 
+  left: 0, 
+  width: '100vw', 
+  height: '100vh', 
+  backgroundColor: 'rgba(0,0,0,0.95)', // Darker for better focus
+  zIndex: 9999, // Ensure it sits above the Header and ComposeBox
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center', 
+  cursor: 'zoom-out' 
+},
+maximizedImage: { 
+  maxWidth: '90%', 
+  maxHeight: '90%', 
+  borderRadius: 'var(--radius-md)', 
+  boxShadow: '0 0 40px rgba(0,0,0,0.7)', 
+  objectFit: 'contain',
+  userSelect: 'none' // Prevents accidental dragging while clicking to close
+},
   closeBtn: { position: 'absolute', top: 24, right: 24, background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', borderRadius: '50%', width: 36, height: 36, fontSize: 18, cursor: 'pointer', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
   // Comments
