@@ -75,6 +75,23 @@ export async function fetchPosts() {
   return data ?? [];
 }
 
+export async function uploadKeyBackup(userId, encryptedBundle) {
+  const { error } = await supabase
+    .from("user_key_backups")
+    .upsert({ user_id: userId, encrypted_priv_key: encryptedBundle });
+  if (error) throw error;
+}
+
+export async function downloadKeyBackup(userId) {
+  const { data, error } = await supabase
+    .from("user_key_backups")
+    .select("encrypted_priv_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.encrypted_priv_key;
+}
+
 export async function createPost({ userId, userEmail, encryptedContent, contentIv, mediaUrl, mediaIv, mediaMime, mediaType }) {
   const { data, error } = await supabase
     .from("posts")

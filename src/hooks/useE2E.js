@@ -27,6 +27,8 @@ import {
 import {
   publishPublicKey,
   fetchOtherUserPublicKey,
+  uploadKeyBackup,
+  downloadKeyBackup,
 } from "../lib/api";
 import {
   setSessionKeys,
@@ -51,26 +53,37 @@ export function useE2E(user) {
     }
 
     async function checkKeyStatus() {
-      try {
-        const localKeyExists = await hasPrivateKey(user.id);
-        if (!localKeyExists) {
-          setStatus("need_setup");
-        } else {
-          setStatus("need_unlock");
-        }
-      } catch (err) {
-        setError("Failed to check key status: " + err.message);
-        setStatus("error");
+  try {
+    const localKeyExists = await hasPrivateKey(user.id);
+    if (localKeyExists) {
+      setStatus("need_unlock");
+    } else {
+      // CHECK SUPABASE FOR BACKUP
+      const backup = await downloadKeyBackup(user.id); // From api.js
+      if (backup) {
+        setStatus("need_unlock"); // We have a cloud backup, just need password
+      } else {
+        setStatus("need_setup");
       }
     }
+  } catch (err) {
+    setError("Failed to check key status");
+    setStatus("error");
+  }
+}
 
     checkKeyStatus();
   }, [user]);
 
   // ── Poll for the other user's public key once we're unlocked ────────────
+  // ── Poll for the other user's public key ────────────────────────────
   useEffect(() => {
-    if (status !== "waiting" && status !== "ready") return;
+    // CHANGE: Only run if we are actually waiting. 
+    // If it's "ready", this effect will stop and won't loop.
+    if (status !== "waiting") return; 
+
     let cancelled = false;
+    let timerId;
 
     async function pollForOtherKey() {
       try {
@@ -78,9 +91,8 @@ export function useE2E(user) {
         if (cancelled) return;
 
         if (other?.public_key) {
-          // Derive the shared key and activate encryption
           const myKeys = getSessionKeys();
-          if (!myKeys) return;
+          if (!myKeys?.myPrivateCryptoKey) return;
 
           const theirPublicCryptoKey = await importPublicKey(other.public_key);
           const sharedAesKey = await deriveSharedKey(myKeys.myPrivateCryptoKey, theirPublicCryptoKey);
@@ -92,78 +104,91 @@ export function useE2E(user) {
           });
 
           setOtherUserReady(true);
-          setStatus("ready");
+          setStatus("ready"); 
         } else {
-          setStatus("waiting");
           // Retry in 5 seconds
-          setTimeout(pollForOtherKey, 5000);
+          timerId = setTimeout(pollForOtherKey, 5000);
         }
       } catch (err) {
-        if (!cancelled) {
-          setError("Failed to fetch partner's key: " + err.message);
-        }
+        if (!cancelled) setError("Partner key error: " + err.message);
       }
     }
 
     pollForOtherKey();
-    return () => { cancelled = true; };
-  }, [status, user]);
+    return () => { 
+      cancelled = true; 
+      if (timerId) clearTimeout(timerId); // Cleanup timer!
+    };
+  }, [status, user?.id]); // Use user.id to avoid unnecessary re-runs
 
   // ── First-time setup: generate keys ─────────────────────────────────────
   const setupKeys = useCallback(async (password) => {
-    setError("");
-    try {
-      // 1. Generate ECDH keypair
-      const { publicKeyB64, privateKeyJwk } = await generateKeyPair();
+  try {
+    const { publicKeyB64, privateKeyJwk } = await generateKeyPair();
+    const encryptedBundle = await encryptPrivateKey(privateKeyJwk, password);
+    
+    // Save locally
+    await saveEncryptedPrivateKey(user.id, encryptedBundle);
+    
+    // NEW: Save to Supabase so Vercel can find it later!
+    await uploadKeyBackup(user.id, encryptedBundle); 
 
-      // 2. Encrypt private key with password, store in IndexedDB
-      const encryptedBundle = await encryptPrivateKey(privateKeyJwk, password);
-      await saveEncryptedPrivateKey(user.id, encryptedBundle);
-
-      // 3. Import private key as CryptoKey and store in memory
-      const myPrivateCryptoKey = await importPrivateKey(privateKeyJwk);
-      setSessionKeys({ myPrivateCryptoKey, theirPublicCryptoKey: null, sharedAesKey: null });
-
-      // 4. Publish public key to Supabase
-      await publishPublicKey(user.id, publicKeyB64);
-
-      // 5. Move to "waiting" — poll for the other user's key
-      setStatus("waiting");
-    } catch (err) {
-      setError("Key setup failed: " + err.message);
-    }
-  }, [user]);
+    await publishPublicKey(user.id, publicKeyB64);
+    setStatus("waiting");
+  } catch (err) {
+    setError("Setup failed: " + err.message);
+  }
+}, [user]);
 
   // ── Unlock: decrypt private key from IndexedDB using password ───────────
   const unlockKeys = useCallback(async (password) => {
-    setError("");
-    try {
-      // 1. Load encrypted bundle from IndexedDB
-      const encryptedBundle = await loadEncryptedPrivateKey(user.id);
-      if (!encryptedBundle) {
+  setError("");
+  try {
+    // 1. Try loading from local IndexedDB first
+    let encryptedBundle = await loadEncryptedPrivateKey(user.id);
+
+    // 2. If not found locally (e.g., new device/Vercel), try cloud backup
+    if (!encryptedBundle) {
+      console.log("Key not found in IndexedDB, checking cloud backup...");
+      const cloudBackup = await downloadKeyBackup(user.id); // From your api.js
+
+      if (cloudBackup) {
+        encryptedBundle = cloudBackup;
+        // Save it locally so we don't have to download from Supabase next time
+        await saveEncryptedPrivateKey(user.id, encryptedBundle);
+      } else {
+        // If no backup exists anywhere, we must re-setup
         setStatus("need_setup");
+        setError("No private key found on this device or in the cloud. Please set up new keys.");
         return;
       }
-
-      // 2. Decrypt it (will throw if password is wrong)
-      let privateKeyJwk;
-      try {
-        privateKeyJwk = await decryptPrivateKey(encryptedBundle, password);
-      } catch {
-        setError("Incorrect password. Your private key could not be unlocked.");
-        return;
-      }
-
-      // 3. Import as CryptoKey and store in memory
-      const myPrivateCryptoKey = await importPrivateKey(privateKeyJwk);
-      setSessionKeys({ myPrivateCryptoKey, theirPublicCryptoKey: null, sharedAesKey: null });
-
-      // 4. Try to fetch other user's key right away
-      setStatus("waiting");
-    } catch (err) {
-      setError("Failed to unlock keys: " + err.message);
     }
-  }, [user]);
+
+    // 3. Decrypt the bundle using the user's password
+    let privateKeyJwk;
+    try {
+      privateKeyJwk = await decryptPrivateKey(encryptedBundle, password);
+    } catch (err) {
+      setError("Incorrect password. Your private key could not be unlocked.");
+      return;
+    }
+
+    // 4. Import the decrypted JWK as a CryptoKey and store in memory (sessionKeys.js)
+    const myPrivateCryptoKey = await importPrivateKey(privateKeyJwk);
+    setSessionKeys({ 
+      myPrivateCryptoKey, 
+      theirPublicCryptoKey: null, 
+      sharedAesKey: null 
+    });
+
+    // 5. Success! Move to waiting to derive the shared key with the partner
+    setStatus("waiting");
+
+  } catch (err) {
+    console.error("Unlock error:", err);
+    setError("Failed to unlock keys: " + err.message);
+  }
+}, [user, setStatus, setError]);
 
   // ── Sign out: clear in-memory keys ──────────────────────────────────────
   const lock = useCallback(() => {
