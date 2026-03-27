@@ -33,9 +33,7 @@ function VideoPlayer({ url, mimeType, postId }) {
   const [videoSrc, setVideoSrc] = useState(null);
 
   useEffect(() => {
-    if (url) {
-      setVideoSrc(url);
-    }
+    if (url) setVideoSrc(url);
   }, [url]);
 
   if (!videoSrc) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-3)', fontSize: 12 }}>decrypting video...</div>;
@@ -45,6 +43,7 @@ function VideoPlayer({ url, mimeType, postId }) {
       key={postId}
       controls
       playsInline
+      webkit-playsinline="true"
       style={s.media}
       preload="metadata"
     >
@@ -191,13 +190,13 @@ export function PostCard({ post, currentUser, onRefresh }) {
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
 
   const isOwn = post.user_id === currentUser.id;
   const safeLikes = Array.isArray(post.likes) ? post.likes : [];
   const liked = safeLikes.includes(currentUser.id);
   const displayContent = post._plainContent;
   const mediaUrl = post._mediaObjectUrl;
-  const [isMaximized, setIsMaximized] = useState(false);
 
   async function handleLike() {
     if (likeLoading) return;
@@ -241,32 +240,32 @@ export function PostCard({ post, currentUser, onRefresh }) {
         )}
       </div>
 
-      {displayContent && <p style={s.content}>{displayContent}</p>}
+      {displayContent ? (
+        <p style={s.content}>{displayContent}</p>
+      ) : !post.media_url ? (
+        <p style={{...s.content, color: 'var(--color-text-3)', fontStyle: 'italic'}}>[locked or empty]</p>
+      ) : null}
 
       {mediaUrl && post.media_type === "image" && (
-  <div style={s.mediaWrap} onClick={() => setIsMaximized(true)}>
-    <img src={mediaUrl} alt="Post attachment" style={{...s.media, cursor: 'zoom-in'}} />
-  </div>
-)}
+        <div style={s.mediaWrap} onClick={() => setIsMaximized(true)}>
+          <img src={mediaUrl} alt="Post attachment" style={{...s.media, cursor: 'zoom-in'}} loading="lazy" />
+        </div>
+      )}
 
       {mediaUrl && post.media_type === "video" && (
-  <div style={s.mediaWrap}>
-    <VideoPlayer 
-      url={mediaUrl} 
-      mimeType={post.media_mime} 
-      postId={post.id} 
-      // We'll update VideoPlayer to accept a custom style if needed
-    />
-  </div>
-)}
+        <div style={s.mediaWrap}>
+          <VideoPlayer url={mediaUrl} mimeType={post.media_mime} postId={post.id} />
+        </div>
+      )}
 
-{/* Simple Fullscreen Overlay */}
-{isMaximized && (
-  <div style={s.overlay} onClick={() => setIsMaximized(false)}>
-    <img src={mediaUrl} style={s.maximizedImage} />
-    <button style={s.closeBtn}>✕</button>
-  </div>
-)}
+      {/* Fullscreen Modal Overlay */}
+      {isMaximized && (
+        <div style={s.overlay} onClick={() => setIsMaximized(false)}>
+          <img src={mediaUrl} style={s.maximizedImage} alt="Fullscreen view" />
+          <button style={s.closeBtn} aria-label="Close fullscreen">✕</button>
+        </div>
+      )}
+
       <ErrorBanner message={error} onDismiss={() => setError("")} />
 
       <div style={s.footer}>
@@ -293,16 +292,21 @@ export function PostCard({ post, currentUser, onRefresh }) {
 }
 
 const s = {
-  card: { background: "var(--color-surface)", border: "0.5px solid var(--color-border-md)", borderRadius: "var(--radius-lg)", padding: "14px 16px", marginBottom: 12, boxShadow: "var(--shadow-card)" },
+  card: { background: "var(--color-surface)", border: "0.5px solid var(--color-border-md)", borderRadius: "var(--radius-lg)", padding: "14px 16px", marginBottom: 12, boxShadow: "var(--shadow-card)", position: 'relative' },
   header: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 },
   email: { fontSize: 13, fontWeight: 500, color: "var(--color-text-1)", margin: 0 },
   time: { fontSize: 12, color: "var(--color-text-3)", display: "block", marginTop: 2 },
   content: { fontSize: 15, fontFamily: "var(--font-display)", lineHeight: 1.7, color: "var(--color-text-1)", margin: "0 0 12px", whiteSpace: "pre-wrap", wordBreak: "break-word" },
   mediaWrap: { borderRadius: "var(--radius-md)", overflow: "hidden", border: "0.5px solid var(--color-border)", marginBottom: 10, background: "var(--color-surface-2)" },
-  media: { width: "100%", maxHeight: 400, display: "block" },
+  media: { width: "100%", maxHeight: 400, display: "block", objectFit: 'contain' },
   footer: { display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8, borderTop: "0.5px solid var(--color-border)" },
   actionBtn: { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)", fontSize: 13 },
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
+
+  // Fullscreen Overlay
+  overlay: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.92)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' },
+  maximizedImage: { maxWidth: '95%', maxHeight: '95%', borderRadius: 'var(--radius-md)', boxShadow: '0 0 30px rgba(0,0,0,0.5)', objectFit: 'contain' },
+  closeBtn: { position: 'absolute', top: 24, right: 24, background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', borderRadius: '50%', width: 36, height: 36, fontSize: 18, cursor: 'pointer', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
   // Comments
   commentSection: { marginTop: 12, paddingTop: 12, borderTop: "0.5px solid var(--color-border)" },
