@@ -7,8 +7,10 @@ export function usePosts(encryptionReady) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [newPostAlert, setNewPostAlert] = useState(false);
   const mediaCache = useRef({});
   const mountedRef = useRef(true);
+  const isFirstLoad = useRef(true);
 
   const decryptPost = useCallback(async (post) => {
     const keys = getSessionKeys();
@@ -43,13 +45,22 @@ export function usePosts(encryptionReady) {
     return decrypted;
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (isBackground = false) => {
     if (!encryptionReady) return;
     setError(null);
     try {
       const raw = await fetchPosts();
       const decryptedPosts = await Promise.all(raw.map(decryptPost));
-      if (mountedRef.current) setPosts(decryptedPosts);
+      if (mountedRef.current) {
+        setPosts(prev => {
+          // If background refresh and there are new posts, show alert
+          if (isBackground && !isFirstLoad.current && raw.length > prev.length) {
+            setNewPostAlert(true);
+          }
+          return decryptedPosts;
+        });
+        isFirstLoad.current = false;
+      }
     } catch (err) {
       if (mountedRef.current) setError(err.message ?? "Failed to load posts.");
     } finally {
@@ -61,11 +72,12 @@ export function usePosts(encryptionReady) {
     mountedRef.current = true;
     if (encryptionReady) {
       setLoading(true);
-      refresh();
+      refresh(false);
     }
 
+    // Real-time subscription — auto-refresh instantly when any change happens
     const unsubscribe = subscribeToPosts(() => {
-      if (mountedRef.current && encryptionReady) refresh();
+      if (mountedRef.current && encryptionReady) refresh(true);
     });
 
     return () => {
@@ -78,5 +90,5 @@ export function usePosts(encryptionReady) {
     };
   }, [refresh, encryptionReady]);
 
-  return { posts, loading, error, refresh };
+  return { posts, loading, error, refresh: () => refresh(false), newPostAlert, clearAlert: () => setNewPostAlert(false) };
 }

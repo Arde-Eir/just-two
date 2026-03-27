@@ -1,10 +1,12 @@
-import React, { useState } from "react";
-import { deletePost, deleteMedia, toggleLike } from "../lib/api";
+import React, { useState, useEffect, useCallback } from "react";
+import { deletePost, deleteMedia, toggleLike, fetchComments, createComment, deleteComment, subscribeToComments } from "../lib/api";
+import { encryptText, decryptText } from "../lib/crypto";
+import { getSessionKeys } from "../lib/sessionKeys";
 import { timeAgo } from "../lib/utils";
 import { Avatar, Button, ErrorBanner } from "./UI";
 
 const TrashIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
     <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
   </svg>
@@ -20,16 +22,153 @@ const HeartIcon = ({ filled }) => filled ? (
   </svg>
 );
 
+const CommentIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+  </svg>
+);
+
+// ── Comment Item ──────────────────────────────────────────────────────────
+function CommentItem({ comment, currentUser, onDelete }) {
+  const isOwn = comment.user_id === currentUser.id;
+  return (
+    <div style={s.comment}>
+      <div style={s.commentHeader}>
+        <Avatar email={comment.user_email} size={24} />
+        <span style={s.commentEmail}>{comment.user_email}</span>
+        <span style={s.commentTime}>{timeAgo(comment.created_at)}</span>
+        {isOwn && (
+          <button style={s.commentDelete} onClick={() => onDelete(comment.id)} title="Delete comment">
+            <TrashIcon />
+          </button>
+        )}
+      </div>
+      <p style={s.commentText}>{comment._plainContent || "[could not decrypt]"}</p>
+    </div>
+  );
+}
+
+// ── Comment Section ───────────────────────────────────────────────────────
+function CommentSection({ postId, currentUser }) {
+  const [comments, setComments] = useState([]);
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const decryptComments = useCallback(async (raw) => {
+    const keys = getSessionKeys();
+    if (!keys?.sharedAesKey) return raw;
+    return Promise.all(raw.map(async (c) => {
+      try {
+        const plain = await decryptText(c.content, c.content_iv, keys.sharedAesKey);
+        return { ...c, _plainContent: plain };
+      } catch {
+        return { ...c, _plainContent: "[could not decrypt]" };
+      }
+    }));
+  }, []);
+
+  const loadComments = useCallback(async () => {
+    setLoading(true);
+    try {
+      const raw = await fetchComments(postId);
+      const decrypted = await decryptComments(raw);
+      setComments(decrypted);
+    } catch (err) {
+      setError("Failed to load comments.");
+    }
+    setLoading(false);
+  }, [postId, decryptComments]);
+
+  useEffect(() => {
+    loadComments();
+    const unsubscribe = subscribeToComments(postId, loadComments);
+    return unsubscribe;
+  }, [postId, loadComments]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    const keys = getSessionKeys();
+    if (!keys?.sharedAesKey) { setError("Encryption not ready."); return; }
+    setSubmitting(true);
+    setError("");
+    try {
+      const { cipherB64, ivB64 } = await encryptText(text.trim(), keys.sharedAesKey);
+      await createComment({
+        postId,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        encryptedContent: cipherB64,
+        contentIv: ivB64,
+      });
+      setText("");
+      await loadComments();
+    } catch (err) {
+      setError("Failed to post comment.");
+    }
+    setSubmitting(false);
+  }
+
+  async function handleDeleteComment(commentId) {
+    try {
+      await deleteComment(commentId);
+      setComments(prev => prev.filter(c => c.id !== commentId));
+    } catch {
+      setError("Failed to delete comment.");
+    }
+  }
+
+  return (
+    <div style={s.commentSection}>
+      {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
+
+      {loading ? (
+        <p style={s.commentLoading}>loading comments...</p>
+      ) : comments.length > 0 ? (
+        <div style={s.commentList}>
+          {comments.map(c => (
+            <CommentItem key={c.id} comment={c} currentUser={currentUser} onDelete={handleDeleteComment} />
+          ))}
+        </div>
+      ) : (
+        <p style={s.noComments}>no comments yet</p>
+      )}
+
+      <form onSubmit={handleSubmit} style={s.commentForm}>
+        <Avatar email={currentUser.email} size={26} />
+        <input
+          style={s.commentInput}
+          placeholder="write a comment..."
+          value={text}
+          onChange={e => setText(e.target.value)}
+          maxLength={300}
+          disabled={submitting}
+        />
+        <button
+          type="submit"
+          style={{ ...s.commentSubmit, opacity: (!text.trim() || submitting) ? 0.45 : 1 }}
+          disabled={!text.trim() || submitting}
+        >
+          {submitting ? "..." : "send"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ── Post Card ─────────────────────────────────────────────────────────────
 export function PostCard({ post, currentUser, onRefresh }) {
   const [likeLoading, setLikeLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   const isOwn = post.user_id === currentUser.id;
   const safeLikes = Array.isArray(post.likes) ? post.likes : [];
   const liked = safeLikes.includes(currentUser.id);
-  // Use decrypted content if available, fall back gracefully
   const displayContent = post._plainContent;
   const mediaUrl = post._mediaObjectUrl;
 
@@ -83,21 +222,43 @@ export function PostCard({ post, currentUser, onRefresh }) {
             onError={e => { e.target.style.display = "none"; }} />
         </div>
       )}
+
       {mediaUrl && post.media_type === "video" && (
         <div style={s.mediaWrap}>
-          <video src={mediaUrl} controls style={s.media} preload="metadata" />
+          <video
+            key={mediaUrl}
+            controls
+            playsInline
+            style={s.media}
+            preload="metadata"
+          >
+            <source src={mediaUrl} type={post.media_mime || "video/mp4"} />
+            Your browser does not support the video tag.
+          </video>
         </div>
       )}
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
+
       <div style={s.footer}>
-        <button onClick={handleLike} disabled={likeLoading} aria-pressed={liked}
-          style={{ ...s.likeBtn, color: liked ? "var(--color-like-active)" : "var(--color-text-3)" }}>
-          <HeartIcon filled={liked} />
-          <span style={{ fontSize: 13 }}>{safeLikes.length > 0 ? safeLikes.length : ""}</span>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <button onClick={handleLike} disabled={likeLoading} aria-pressed={liked}
+            style={{ ...s.actionBtn, color: liked ? "var(--color-like-active)" : "var(--color-text-3)" }}>
+            <HeartIcon filled={liked} />
+            <span style={{ fontSize: 13 }}>{safeLikes.length > 0 ? safeLikes.length : ""}</span>
+          </button>
+          <button onClick={() => setShowComments(v => !v)}
+            style={{ ...s.actionBtn, color: showComments ? "var(--color-accent)" : "var(--color-text-3)", marginLeft: 4 }}>
+            <CommentIcon />
+            <span style={{ fontSize: 13 }}>{showComments ? "hide" : "comment"}</span>
+          </button>
+        </div>
         <span style={s.encBadge}>🔒 e2e encrypted</span>
       </div>
+
+      {showComments && (
+        <CommentSection postId={post.id} currentUser={currentUser} />
+      )}
     </article>
   );
 }
@@ -109,8 +270,23 @@ const s = {
   time: { fontSize: 12, color: "var(--color-text-3)", display: "block", marginTop: 2 },
   content: { fontSize: 15, fontFamily: "var(--font-display)", lineHeight: 1.7, color: "var(--color-text-1)", margin: "0 0 12px", whiteSpace: "pre-wrap", wordBreak: "break-word" },
   mediaWrap: { borderRadius: "var(--radius-md)", overflow: "hidden", border: "0.5px solid var(--color-border)", marginBottom: 10, background: "var(--color-surface-2)" },
-  media: { width: "100%", maxHeight: 400, objectFit: "cover", display: "block" },
+  media: { width: "100%", maxHeight: 400, display: "block" },
   footer: { display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8, borderTop: "0.5px solid var(--color-border)" },
-  likeBtn: { display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)" },
+  actionBtn: { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)", fontSize: 13 },
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
+
+  // Comments
+  commentSection: { marginTop: 12, paddingTop: 12, borderTop: "0.5px solid var(--color-border)" },
+  commentList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 },
+  comment: { display: "flex", flexDirection: "column", gap: 4 },
+  commentHeader: { display: "flex", alignItems: "center", gap: 6 },
+  commentEmail: { fontSize: 12, fontWeight: 500, color: "var(--color-text-1)" },
+  commentTime: { fontSize: 11, color: "var(--color-text-3)", marginLeft: "auto" },
+  commentDelete: { background: "none", border: "none", cursor: "pointer", color: "var(--color-text-3)", padding: 2, display: "flex", alignItems: "center" },
+  commentText: { fontSize: 13, color: "var(--color-text-1)", margin: "0 0 0 30px", lineHeight: 1.5, fontFamily: "var(--font-display)", fontStyle: "italic" },
+  commentLoading: { fontSize: 12, color: "var(--color-text-3)", margin: "0 0 10px" },
+  noComments: { fontSize: 12, color: "var(--color-text-3)", fontStyle: "italic", margin: "0 0 10px", textAlign: "center" },
+  commentForm: { display: "flex", alignItems: "center", gap: 8, marginTop: 4 },
+  commentInput: { flex: 1, border: "0.5px solid var(--color-border-md)", borderRadius: "var(--radius-full)", padding: "7px 14px", fontSize: 13, outline: "none", background: "var(--color-surface-2)", fontFamily: "var(--font-display)", fontStyle: "italic", color: "var(--color-text-1)" },
+  commentSubmit: { background: "var(--color-text-1)", color: "#fff", border: "none", borderRadius: "var(--radius-full)", padding: "7px 14px", fontSize: 12, cursor: "pointer", fontFamily: "var(--font-body)", fontWeight: 500, whiteSpace: "nowrap" },
 };
