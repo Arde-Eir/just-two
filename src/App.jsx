@@ -8,7 +8,7 @@ import { KeySetupScreen } from "./components/KeySetupScreen";
 import { Spinner } from "./components/UI";
 import { clearSessionKeys } from "./lib/sessionKeys";
 import { signOut } from "./lib/api";
-import "./styles/global.css";
+import "src/styles/global.css";
 
 export default function App() {
   const { user, loading: authLoading }                          = useAuth();

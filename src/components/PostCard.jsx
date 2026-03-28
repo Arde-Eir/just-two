@@ -29,25 +29,22 @@ const CommentIcon = () => (
 );
 
 // ── Video Player Component ───────────────────────────────────────────────
-function VideoPlayer({ url, mimeType, postId }) {
-  const [videoSrc, setVideoSrc] = useState(null);
-
-  useEffect(() => {
-    if (url) setVideoSrc(url);
-  }, [url]);
-
-  if (!videoSrc) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-3)', fontSize: 12 }}>decrypting video...</div>;
+function VideoPlayer({ url, mimeType }) {
+  if (!url) return (
+    <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-3)', fontSize: 12 }}>
+      decrypting video...
+    </div>
+  );
 
   return (
     <video
-      key={url} // Fix: forces reload on Desktop when URL changes
+      key={url}
       controls
       playsInline
-      webkit-playsinline="true"
       style={s.media}
       preload="metadata"
     >
-      <source src={videoSrc} type={mimeType || "video/mp4"} />
+      <source src={url} type={mimeType || "video/mp4"} />
       Your browser does not support the video tag.
     </video>
   );
@@ -100,7 +97,7 @@ function CommentSection({ postId, currentUser }) {
       const raw = await fetchComments(postId);
       const decrypted = await decryptComments(raw);
       setComments(decrypted);
-    } catch (err) {
+    } catch {
       setError("Failed to load comments.");
     }
     setLoading(false);
@@ -130,7 +127,7 @@ function CommentSection({ postId, currentUser }) {
       });
       setText("");
       await loadComments();
-    } catch (err) {
+    } catch {
       setError("Failed to post comment.");
     }
     setSubmitting(false);
@@ -185,6 +182,10 @@ function CommentSection({ postId, currentUser }) {
 
 // ── Post Card ─────────────────────────────────────────────────────────────
 export function PostCard({ post, currentUser, onRefresh }) {
+  // Always derive a safe likes array from the post prop
+  const initialLikes = Array.isArray(post.likes) ? post.likes : [];
+
+  const [localLikes, setLocalLikes] = useState(initialLikes);
   const [likeLoading, setLikeLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [error, setError] = useState("");
@@ -192,13 +193,16 @@ export function PostCard({ post, currentUser, onRefresh }) {
   const [showComments, setShowComments] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
 
-  const isOwn = post.user_id === currentUser.id;
-  const safeLikes = Array.isArray(post.likes) ? post.likes : [];
-  const liked = safeLikes.includes(currentUser.id);
+  // Keep localLikes in sync when post prop changes (e.g. after refresh)
+  useEffect(() => {
+    setLocalLikes(Array.isArray(post.likes) ? post.likes : []);
+  }, [post.likes]);
+
+  const liked = localLikes.includes(currentUser.id);
   const displayContent = post._plainContent;
   const mediaUrl = post._mediaObjectUrl;
 
-  // Esc key listener for Desktop Fullscreen
+  // Esc key listener for fullscreen
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') setIsMaximized(false);
@@ -214,11 +218,31 @@ export function PostCard({ post, currentUser, onRefresh }) {
   }, [isMaximized]);
 
   async function handleLike() {
+    // Prevent double-clicks
     if (likeLoading) return;
+
+    // Optimistic update — flip the like immediately
+    const optimisticLikes = liked
+      ? localLikes.filter((id) => id !== currentUser.id)
+      : [...localLikes, currentUser.id];
+
+    setLocalLikes(optimisticLikes);
     setLikeLoading(true);
-    try { await toggleLike(post.id, safeLikes, currentUser.id); onRefresh?.(); }
-    catch { setError("Failed to update like."); }
-    setLikeLoading(false);
+    setError("");
+
+    try {
+      const serverLikes = await toggleLike(post.id, localLikes, currentUser.id);
+      // Reconcile with server truth
+      setLocalLikes(Array.isArray(serverLikes) ? serverLikes : optimisticLikes);
+      // Soft refresh in background (don't block UI)
+      onRefresh?.();
+    } catch (err) {
+      // Roll back optimistic update
+      setLocalLikes(initialLikes);
+      setError(err.message || "Failed to update like. Please try again.");
+    } finally {
+      setLikeLoading(false);
+    }
   }
 
   async function handleDelete() {
@@ -228,16 +252,20 @@ export function PostCard({ post, currentUser, onRefresh }) {
       return;
     }
     setDeleteLoading(true);
+    setError("");
     try {
       if (post.media_url) await deleteMedia(post.media_url);
       await deletePost(post.id);
       onRefresh?.();
-    } catch { setError("Failed to delete post."); setDeleteLoading(false); }
+    } catch (err) {
+      setError(err.message || "Failed to delete post.");
+      setDeleteLoading(false);
+    }
   }
 
   return (
     <>
-      {/* Fullscreen Modal Overlay (Moved outside card to avoid container trapping) */}
+      {/* Fullscreen overlay */}
       {isMaximized && (
         <div style={s.overlay} onClick={() => setIsMaximized(false)}>
           <img src={mediaUrl} style={s.maximizedImage} alt="Fullscreen view" />
@@ -256,9 +284,14 @@ export function PostCard({ post, currentUser, onRefresh }) {
               </time>
             </div>
           </div>
-          {isOwn && (
-            <Button variant={confirmDelete ? "danger" : "icon"} size="sm" onClick={handleDelete}
-              loading={deleteLoading} title={confirmDelete ? "Click again to confirm" : "Delete"}>
+          {post.user_id === currentUser.id && (
+            <Button
+              variant={confirmDelete ? "danger" : "icon"}
+              size="sm"
+              onClick={handleDelete}
+              loading={deleteLoading}
+              title={confirmDelete ? "Click again to confirm" : "Delete"}
+            >
               {confirmDelete ? <span style={{ fontSize: 12 }}>confirm?</span> : <TrashIcon />}
             </Button>
           )}
@@ -267,32 +300,53 @@ export function PostCard({ post, currentUser, onRefresh }) {
         {displayContent ? (
           <p style={s.content}>{displayContent}</p>
         ) : !post.media_url ? (
-          <p style={{...s.content, color: 'var(--color-text-3)', fontStyle: 'italic'}}>[locked or empty]</p>
+          <p style={{ ...s.content, color: 'var(--color-text-3)', fontStyle: 'italic' }}>[locked or empty]</p>
         ) : null}
 
         {mediaUrl && post.media_type === "image" && (
           <div style={s.mediaWrap} onClick={() => setIsMaximized(true)}>
-            <img src={mediaUrl} alt="Post attachment" style={{...s.media, cursor: 'zoom-in'}} loading="lazy" />
+            <img src={mediaUrl} alt="Post attachment" style={{ ...s.media, cursor: 'zoom-in' }} loading="lazy" />
           </div>
         )}
 
         {mediaUrl && post.media_type === "video" && (
           <div style={s.mediaWrap}>
-            <VideoPlayer url={mediaUrl} mimeType={post.media_mime} postId={post.id} />
+            <VideoPlayer url={mediaUrl} mimeType={post.media_mime} />
           </div>
         )}
 
-        <ErrorBanner message={error} onDismiss={() => setError("")} />
+        {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
 
         <div style={s.footer}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <button onClick={handleLike} disabled={likeLoading} aria-pressed={liked}
-              style={{ ...s.actionBtn, color: liked ? "var(--color-like-active)" : "var(--color-text-3)" }}>
+            {/* Like button — optimistic, never crashes */}
+            <button
+              onClick={handleLike}
+              disabled={likeLoading}
+              aria-pressed={liked}
+              aria-label={liked ? "Unlike" : "Like"}
+              style={{
+                ...s.actionBtn,
+                color: liked ? "var(--color-like-active)" : "var(--color-text-3)",
+                opacity: likeLoading ? 0.6 : 1,
+                transform: likeLoading ? "scale(0.92)" : "scale(1)",
+                transition: "opacity 140ms, transform 140ms, color 140ms",
+              }}
+            >
               <HeartIcon filled={liked} />
-              <span style={{ fontSize: 13 }}>{safeLikes.length > 0 ? safeLikes.length : ""}</span>
+              <span style={{ fontSize: 13 }}>
+                {localLikes.length > 0 ? localLikes.length : ""}
+              </span>
             </button>
-            <button onClick={() => setShowComments(v => !v)}
-              style={{ ...s.actionBtn, color: showComments ? "var(--color-accent)" : "var(--color-text-3)", marginLeft: 4 }}>
+
+            <button
+              onClick={() => setShowComments(v => !v)}
+              style={{
+                ...s.actionBtn,
+                color: showComments ? "var(--color-accent)" : "var(--color-text-3)",
+                marginLeft: 4,
+              }}
+            >
               <CommentIcon />
               <span style={{ fontSize: 13 }}>{showComments ? "hide" : "comment"}</span>
             </button>
@@ -320,29 +374,9 @@ const s = {
   actionBtn: { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)", fontSize: 13 },
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
 
-  // Fullscreen Overlay
-  overlay: { 
-    position: 'fixed', 
-    top: 0, 
-    left: 0, 
-    width: '100vw', 
-    height: '100vh', 
-    backgroundColor: 'rgba(0,0,0,0.96)', 
-    zIndex: 99999, 
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    cursor: 'zoom-out',
-    margin: 0,
-    padding: 0
-  },
-  maximizedImage: { 
-    maxWidth: '100%', 
-    maxHeight: '100%', 
-    objectFit: 'contain',
-    userSelect: 'none',
-    boxShadow: '0 0 50px rgba(0,0,0,0.5)'
-  },
+  // Fullscreen overlay
+  overlay: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.96)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out', margin: 0, padding: 0 },
+  maximizedImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', userSelect: 'none', boxShadow: '0 0 50px rgba(0,0,0,0.5)' },
   closeBtn: { position: 'absolute', top: 24, right: 24, background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', borderRadius: '50%', width: 36, height: 36, fontSize: 18, cursor: 'pointer', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
   // Comments

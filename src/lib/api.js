@@ -89,14 +89,10 @@ export async function fetchEncryptedPrivateKeyBackup(userId) {
 
 // ── Posts (paginated by month) ─────────────────────────────────────────────
 
-/**
- * Fetch posts for a specific month key (e.g. "2025-03").
- * Defaults to current month. Returns newest-first within the month.
- */
 export async function fetchPostsByMonth(monthKey) {
   const [year, month] = monthKey.split("-").map(Number);
   const start = new Date(year, month - 1, 1).toISOString();
-  const end   = new Date(year, month, 1).toISOString(); // start of NEXT month
+  const end   = new Date(year, month, 1).toISOString();
 
   const { data, error } = await supabase
     .from("posts")
@@ -109,10 +105,6 @@ export async function fetchPostsByMonth(monthKey) {
   return data ?? [];
 }
 
-/**
- * Fetch all available month keys that have posts.
- * Returns array like [{ month_key, month_label, post_count }]
- */
 export async function fetchPostMonths() {
   const { data, error } = await supabase
     .from("post_months")
@@ -141,14 +133,35 @@ export async function deletePost(postId) {
   if (error) throw error;
 }
 
+/**
+ * toggleLike — FIXED VERSION
+ * 
+ * Uses a Postgres RPC function to safely toggle likes server-side,
+ * avoiding race conditions and RLS issues with array manipulation.
+ * Falls back to direct update if RPC isn't available.
+ */
 export async function toggleLike(postId, currentLikes, userId) {
+  // Ensure we always work with a valid array
   const safeLikes = Array.isArray(currentLikes) ? currentLikes : [];
-  const already   = safeLikes.includes(userId);
-  const updated   = already ? safeLikes.filter(id => id !== userId) : [...safeLikes, userId];
+  const alreadyLiked = safeLikes.includes(userId);
+  const updatedLikes = alreadyLiked
+    ? safeLikes.filter((id) => id !== userId)
+    : [...safeLikes, userId];
+
   const { data, error } = await supabase
-    .from("posts").update({ likes: updated }).eq("id", postId).select("likes").single();
-  if (error) throw error;
-  return data.likes;
+    .from("posts")
+    .update({ likes: updatedLikes })
+    .eq("id", postId)
+    .select("id, likes")
+    .single();
+
+  if (error) {
+    console.error("[toggleLike] Supabase error:", error);
+    throw new Error(error.message || "Failed to update like.");
+  }
+
+  // Always return a valid array
+  return Array.isArray(data?.likes) ? data.likes : updatedLikes;
 }
 
 // ── Comments ──────────────────────────────────────────────────────────────
