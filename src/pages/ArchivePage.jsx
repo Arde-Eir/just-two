@@ -56,8 +56,7 @@ function MediaItem({ post, keys }) {
           <div style={s.mediaPlaceholder}><Spinner size={20} /></div>
         ) : url ? (
           post.media_type === "video" ? (
-            <video src={url} controls style={s.mediaEl} onLoadedData={() => setLoaded(true)} />
-          ) : (
+<video src={url} controls playsInline preload="auto" style={s.mediaEl} onLoadedData={() => setLoaded(true)} />          ) : (
             <img src={url} alt="memory" style={s.mediaEl} onLoad={() => setLoaded(true)} />
           )
         ) : (

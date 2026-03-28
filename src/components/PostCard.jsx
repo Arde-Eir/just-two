@@ -41,15 +41,12 @@ function VideoPlayer({ url, mimeType }) {
       key={url}
       controls
       playsInline
+      src={url}
       style={s.media}
-      preload="metadata"
-    >
-      <source src={url} type={mimeType || "video/mp4"} />
-      Your browser does not support the video tag.
-    </video>
+      preload="auto"
+    />
   );
 }
-
 // ── Comment Item ──────────────────────────────────────────────────────────
 function CommentItem({ comment, currentUser, onDelete }) {
   const isOwn = comment.user_id === currentUser.id;
