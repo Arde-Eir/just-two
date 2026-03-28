@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { fetchWishlists, createWishlist, deleteWishlist, markWishlistComplete, fetchWishlistPostCount, subscribeToWishlists } from "../lib/api";
+import { fetchWishlists, createWishlist, deleteWishlist, markWishlistComplete, fetchWishlistPostCount, subscribeToWishlists, subscribeToPosts } from "../lib/api";
 import { encryptText, decryptText } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
 import { Avatar, Button, Input, ErrorBanner, Spinner } from "../components/UI";
 import { timeAgo } from "../lib/utils";
 
-// ── Icons ─────────────────────────────────────────────────────────────────
 const GiftIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/>
@@ -28,14 +27,13 @@ const TrashIcon = () => (
   </svg>
 );
 
-// ── Progress Ring ─────────────────────────────────────────────────────────
 function ProgressRing({ count, required, complete }) {
-  const size    = 64;
-  const stroke  = 5;
-  const r       = (size - stroke) / 2;
-  const circ    = 2 * Math.PI * r;
-  const pct     = Math.min(count / required, 1);
-  const offset  = circ * (1 - pct);
+  const size   = 64;
+  const stroke = 5;
+  const r      = (size - stroke) / 2;
+  const circ   = 2 * Math.PI * r;
+  const pct    = Math.min(count / Math.max(required, 1), 1);
+  const offset = circ * (1 - pct);
 
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
@@ -60,18 +58,17 @@ function ProgressRing({ count, required, complete }) {
   );
 }
 
-// ── Create Wishlist Form ──────────────────────────────────────────────────
 function CreateWishlistForm({ user, onCreated, onCancel }) {
-  const [title, setTitle]           = useState("");
-  const [description, setDescription] = useState("");
-  const [reward, setReward]         = useState("");
-  const [requiredCount, setRequiredCount] = useState(5);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState("");
+  const [title, setTitle]                   = useState("");
+  const [description, setDescription]       = useState("");
+  const [reward, setReward]                 = useState("");
+  const [requiredCount, setRequiredCount]   = useState(5);
+  const [loading, setLoading]               = useState(false);
+  const [error, setError]                   = useState("");
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!title.trim()) { setError("Title is required."); return; }
+    if (!title.trim())  { setError("Title is required."); return; }
     if (!reward.trim()) { setError("Reward is required — what will they get?"); return; }
     if (requiredCount < 1 || requiredCount > 100) { setError("Required uploads must be between 1 and 100."); return; }
 
@@ -80,8 +77,8 @@ function CreateWishlistForm({ user, onCreated, onCancel }) {
 
     setLoading(true); setError("");
     try {
-      const encTitle = await encryptText(title.trim(), keys.sharedAesKey);
-      const encDesc  = description.trim() ? await encryptText(description.trim(), keys.sharedAesKey) : null;
+      const encTitle  = await encryptText(title.trim(), keys.sharedAesKey);
+      const encDesc   = description.trim() ? await encryptText(description.trim(), keys.sharedAesKey) : null;
       const encReward = await encryptText(reward.trim(), keys.sharedAesKey);
 
       await createWishlist({
@@ -130,36 +127,50 @@ function CreateWishlistForm({ user, onCreated, onCancel }) {
             style={{ flex: 1, background: "var(--color-wish-accent)", fontFamily: "var(--font-display)", fontStyle: "italic" }}>
             create goal
           </Button>
-          <Button type="button" variant="ghost" size="md" onClick={onCancel} disabled={loading}>
-            cancel
-          </Button>
+          <Button type="button" variant="ghost" size="md" onClick={onCancel} disabled={loading}>cancel</Button>
         </div>
       </form>
     </div>
   );
 }
 
-// ── Wishlist Card ─────────────────────────────────────────────────────────
-function WishlistCard({ wishlist, currentUser, onDelete, onComplete }) {
-  const [count, setCount]   = useState(0);
+function WishlistCard({ wishlist, currentUser, onDelete, onReload }) {
+  const [count, setCount]     = useState(0);
   const [loading, setLoading] = useState(true);
-  const isOwn = wishlist.creator_id === currentUser.id;
-  const complete = wishlist.is_complete || count >= wishlist.required_count;
+  const isOwn     = wishlist.creator_id === currentUser.id;
+  const complete  = wishlist.is_complete || count >= wishlist.required_count;
 
-  useEffect(() => {
-    fetchWishlistPostCount(wishlist.id).then(c => { setCount(c); setLoading(false); });
+  const loadCount = useCallback(async () => {
+    try {
+      const c = await fetchWishlistPostCount(wishlist.id);
+      setCount(c);
+    } catch {}
+    setLoading(false);
   }, [wishlist.id]);
 
-  // Auto-mark complete when count reaches required
+  useEffect(() => {
+    loadCount();
+    // Re-count whenever ANY post changes (covers the case where
+    // a post tagged to this wishlist is created or deleted)
+    const unsub = subscribeToPosts(() => loadCount());
+    return unsub;
+  }, [loadCount]);
+
+  // Auto-mark complete when threshold reached
   useEffect(() => {
     if (!wishlist.is_complete && count >= wishlist.required_count && count > 0) {
-      markWishlistComplete(wishlist.id).catch(() => {});
+      markWishlistComplete(wishlist.id)
+        .then(() => onReload?.())
+        .catch(() => {});
     }
-  }, [count, wishlist]);
+  }, [count, wishlist, onReload]);
 
   return (
-    <div style={{ ...s.card, borderColor: complete ? "#22c55e" : "var(--color-wish-border)", background: complete ? "var(--color-wish-bg)" : "var(--color-surface)" }}
-      className="fade-up">
+    <div style={{
+      ...s.card,
+      borderColor: complete ? "#22c55e" : "var(--color-wish-border)",
+      background:  complete ? "var(--color-wish-bg)" : "var(--color-surface)",
+    }} className="fade-up">
       <div style={s.cardTop}>
         <ProgressRing count={count} required={wishlist.required_count} complete={complete} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -181,8 +192,21 @@ function WishlistCard({ wishlist, currentUser, onDelete, onComplete }) {
         </div>
       </div>
 
-      {/* Reward reveal */}
-      <div style={{ ...s.rewardBox, background: complete ? "#dcfce7" : "var(--color-wish-light)", borderColor: complete ? "#86efac" : "var(--color-wish-border)" }}>
+      {/* How to contribute hint */}
+      {!complete && (
+        <div style={s.hintBox}>
+          <span style={s.hintText}>
+            📸 Post a photo or video from the <strong>feed tab</strong> and tag this goal to count toward it
+          </span>
+        </div>
+      )}
+
+      {/* Reward box */}
+      <div style={{
+        ...s.rewardBox,
+        background:   complete ? "#dcfce7" : "var(--color-wish-light)",
+        borderColor:  complete ? "#86efac" : "var(--color-wish-border)",
+      }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: complete ? 6 : 0 }}>
           <StarIcon />
           <span style={{ ...s.rewardLabel, color: complete ? "#16a34a" : "var(--color-wish-accent)" }}>
@@ -199,23 +223,23 @@ function WishlistCard({ wishlist, currentUser, onDelete, onComplete }) {
       {/* Progress bar */}
       {!complete && (
         <div style={s.progressTrack}>
-          <div style={{ ...s.progressBar, width: `${Math.min((count / wishlist.required_count) * 100, 100)}%` }} />
+          <div style={{
+            ...s.progressBar,
+            width: `${Math.min((count / wishlist.required_count) * 100, 100)}%`,
+          }} />
         </div>
       )}
 
-      {complete && (
-        <div style={s.completeBadge}>✓ goal complete!</div>
-      )}
+      {complete && <div style={s.completeBadge}>✓ goal complete!</div>}
     </div>
   );
 }
 
-// ── Wishlist Page ─────────────────────────────────────────────────────────
 export function WishlistPage({ user }) {
-  const [wishlists, setWishlists]   = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [showForm, setShowForm]     = useState(false);
-  const [error, setError]           = useState("");
+  const [wishlists, setWishlists] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [error, setError]         = useState("");
 
   const decryptWishlist = useCallback(async (w) => {
     const keys = getSessionKeys();
@@ -223,7 +247,7 @@ export function WishlistPage({ user }) {
     try {
       const title       = await decryptText(w.title, w.title_iv, keys.sharedAesKey);
       const description = w.description ? await decryptText(w.description, w.description_iv, keys.sharedAesKey) : null;
-      const reward      = w.reward ? await decryptText(w.reward, w.reward_iv, keys.sharedAesKey) : null;
+      const reward      = w.reward      ? await decryptText(w.reward,      w.reward_iv,      keys.sharedAesKey) : null;
       return { ...w, _plainTitle: title, _plainDescription: description, _plainReward: reward };
     } catch {
       return { ...w, _plainTitle: "[could not decrypt]" };
@@ -233,10 +257,10 @@ export function WishlistPage({ user }) {
   const load = useCallback(async () => {
     setError("");
     try {
-      const raw = await fetchWishlists();
+      const raw       = await fetchWishlists();
       const decrypted = await Promise.all(raw.map(decryptWishlist));
       setWishlists(decrypted);
-    } catch (err) {
+    } catch {
       setError("Failed to load wishlists.");
     }
     setLoading(false);
@@ -259,7 +283,7 @@ export function WishlistPage({ user }) {
       <div style={s.pageHeader}>
         <div>
           <h2 style={s.pageTitle}><GiftIcon /> wishlist goals</h2>
-          <p style={s.pageSub}>create goals for each other — unlock rewards when complete</p>
+          <p style={s.pageSub}>create goals for each other — tag posts from the feed to count toward a goal</p>
         </div>
         {!showForm && (
           <Button variant="primary" size="sm" onClick={() => setShowForm(true)}
@@ -270,7 +294,11 @@ export function WishlistPage({ user }) {
       </div>
 
       {showForm && (
-        <CreateWishlistForm user={user} onCreated={() => { setShowForm(false); load(); }} onCancel={() => setShowForm(false)} />
+        <CreateWishlistForm
+          user={user}
+          onCreated={() => { setShowForm(false); load(); }}
+          onCancel={() => setShowForm(false)}
+        />
       )}
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
@@ -285,7 +313,13 @@ export function WishlistPage({ user }) {
         </div>
       ) : (
         wishlists.map(w => (
-          <WishlistCard key={w.id} wishlist={w} currentUser={user} onDelete={handleDelete} onComplete={load} />
+          <WishlistCard
+            key={w.id}
+            wishlist={w}
+            currentUser={user}
+            onDelete={handleDelete}
+            onReload={load}
+          />
         ))
       )}
     </div>
@@ -300,7 +334,7 @@ const s = {
   formCard: { background: "var(--color-surface)", border: "0.5px solid var(--color-wish-border)", borderRadius: "var(--radius-lg)", padding: 20, marginBottom: 20, boxShadow: "var(--shadow-card)" },
   formTitle: { fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: 16, color: "var(--color-wish-accent)", marginBottom: 14 },
   label: { display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-text-2)", marginBottom: 5, letterSpacing: "0.03em" },
-  textarea: { display: "block", width: "100%", padding: "10px 14px", border: "1px solid var(--color-border-md)", borderRadius: "var(--radius-md)", background: "var(--color-surface)", color: "var(--color-text-1)", fontSize: 14, outline: "none", resize: "none", fontFamily: "inherit" },
+  textarea: { display: "block", width: "100%", padding: "10px 14px", border: "1px solid var(--color-border-md)", borderRadius: "var(--radius-md)", background: "var(--color-surface)", color: "var(--color-text-1)", fontSize: 14, outline: "none", resize: "none", fontFamily: "inherit", boxSizing: "border-box" },
   countBadge: { background: "var(--color-wish-light)", color: "var(--color-wish-accent)", borderRadius: "var(--radius-md)", padding: "4px 12px", fontSize: 14, fontWeight: 500, minWidth: 40, textAlign: "center" },
   card: { border: "0.5px solid", borderRadius: "var(--radius-lg)", padding: 16, marginBottom: 14, boxShadow: "var(--shadow-card)", transition: "border-color 0.3s ease" },
   cardTop: { display: "flex", gap: 14, marginBottom: 12 },
@@ -309,6 +343,8 @@ const s = {
   metaRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 8 },
   metaText: { fontSize: 11, color: "var(--color-text-3)" },
   deleteBtn: { background: "none", border: "none", cursor: "pointer", color: "var(--color-text-3)", padding: 2, display: "flex", alignItems: "center", flexShrink: 0 },
+  hintBox: { background: "var(--color-surface-2)", border: "0.5px solid var(--color-border)", borderRadius: "var(--radius-md)", padding: "8px 12px", marginBottom: 10 },
+  hintText: { fontSize: 12, color: "var(--color-text-3)", lineHeight: 1.5 },
   rewardBox: { border: "0.5px solid", borderRadius: "var(--radius-md)", padding: "10px 14px", marginBottom: 10, transition: "all 0.4s ease" },
   rewardLabel: { fontSize: 12, fontWeight: 500 },
   rewardText: { fontSize: 14, fontFamily: "var(--font-display)", fontStyle: "italic", marginTop: 2, lineHeight: 1.5 },
