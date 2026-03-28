@@ -50,6 +50,7 @@ export function AuthPage() {
     } catch (err) {
       // Supabase returns fairly safe error messages
       // Map known errors to user-friendly messages
+      console.error("Auth Error:", err);
       const msg = err.message ?? "Something went wrong. Please try again.";
       if (msg.includes("Invalid login credentials")) {
         setGlobalError("Incorrect email or password.");
