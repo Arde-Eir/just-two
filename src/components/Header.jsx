@@ -32,7 +32,6 @@ export function Header({ user, theme, onToggleTheme }) {
     <header style={s.header} role="banner">
       <span style={s.logo}>✦ {APP_NAME}</span>
       <div style={s.right}>
-        {/* Theme toggle */}
         <button
           onClick={onToggleTheme}
           style={s.themeBtn}
@@ -54,7 +53,6 @@ export function Header({ user, theme, onToggleTheme }) {
 const s = {
   header: {
     position: "sticky", top: 0,
-    background: "rgba(var(--color-bg-rgb, 245,243,238),0.88)",
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
     borderBottom: "0.5px solid var(--color-border-md)",
