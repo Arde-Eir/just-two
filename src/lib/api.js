@@ -64,18 +64,13 @@ export async function fetchOtherUserPublicKey(myUserId) {
 }
 
 // ── Encrypted Private Key Backup ───────────────────────────────────────────
-// Stores the password-encrypted private key in Supabase so it can be
-// restored on any device. Safe because it's encrypted with the user's
-// local password before upload — Supabase cannot decrypt it.
 
 export async function backupEncryptedPrivateKey(userId, bundle) {
   const { error } = await supabase
     .from("user_key_backups")
     .upsert({
-      user_id:    userId,
-      cipher_b64: bundle.cipherB64,
-      iv_b64:     bundle.ivB64,
-      salt_b64:   bundle.saltB64,
+      user_id: userId, cipher_b64: bundle.cipherB64,
+      iv_b64: bundle.ivB64, salt_b64: bundle.saltB64,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
   if (error) throw error;
@@ -92,34 +87,51 @@ export async function fetchEncryptedPrivateKeyBackup(userId) {
   return { cipherB64: data.cipher_b64, ivB64: data.iv_b64, saltB64: data.salt_b64 };
 }
 
-// ── Posts ──────────────────────────────────────────────────────────────────
+// ── Posts (paginated by month) ─────────────────────────────────────────────
 
-export async function fetchPosts() {
+/**
+ * Fetch posts for a specific month key (e.g. "2025-03").
+ * Defaults to current month. Returns newest-first within the month.
+ */
+export async function fetchPostsByMonth(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const start = new Date(year, month - 1, 1).toISOString();
+  const end   = new Date(year, month, 1).toISOString(); // start of NEXT month
+
   const { data, error } = await supabase
     .from("posts")
-    .select("id, user_id, user_email, content, content_iv, media_url, media_iv, media_mime, media_type, likes, created_at")
+    .select("id, user_id, user_email, content, content_iv, media_url, media_iv, media_mime, media_type, likes, created_at, wishlist_id")
+    .gte("created_at", start)
+    .lt("created_at", end)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(100);
   if (error) throw error;
   return data ?? [];
 }
 
-export async function createPost({ userId, userEmail, encryptedContent, contentIv, mediaUrl, mediaIv, mediaMime, mediaType }) {
+/**
+ * Fetch all available month keys that have posts.
+ * Returns array like [{ month_key, month_label, post_count }]
+ */
+export async function fetchPostMonths() {
+  const { data, error } = await supabase
+    .from("post_months")
+    .select("month_key, month_label, post_count");
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createPost({ userId, userEmail, encryptedContent, contentIv, mediaUrl, mediaIv, mediaMime, mediaType, wishlistId }) {
   const { data, error } = await supabase
     .from("posts")
     .insert({
-      user_id:     userId,
-      user_email:  userEmail,
-      content:     encryptedContent ?? null,
-      content_iv:  contentIv ?? null,
-      media_url:   mediaUrl ?? null,
-      media_iv:    mediaIv ?? null,
-      media_mime:  mediaMime ?? null,
-      media_type:  mediaType ?? null,
-      likes: [],
+      user_id: userId, user_email: userEmail,
+      content: encryptedContent ?? null, content_iv: contentIv ?? null,
+      media_url: mediaUrl ?? null, media_iv: mediaIv ?? null,
+      media_mime: mediaMime ?? null, media_type: mediaType ?? null,
+      likes: [], wishlist_id: wishlistId ?? null,
     })
-    .select()
-    .single();
+    .select().single();
   if (error) throw error;
   return data;
 }
@@ -134,11 +146,7 @@ export async function toggleLike(postId, currentLikes, userId) {
   const already   = safeLikes.includes(userId);
   const updated   = already ? safeLikes.filter(id => id !== userId) : [...safeLikes, userId];
   const { data, error } = await supabase
-    .from("posts")
-    .update({ likes: updated })
-    .eq("id", postId)
-    .select("likes")
-    .single();
+    .from("posts").update({ likes: updated }).eq("id", postId).select("likes").single();
   if (error) throw error;
   return data.likes;
 }
@@ -149,8 +157,7 @@ export async function fetchComments(postId) {
   const { data, error } = await supabase
     .from("comments")
     .select("id, post_id, user_id, user_email, content, content_iv, created_at")
-    .eq("post_id", postId)
-    .order("created_at", { ascending: true });
+    .eq("post_id", postId).order("created_at", { ascending: true });
   if (error) throw error;
   return data ?? [];
 }
@@ -159,8 +166,7 @@ export async function createComment({ postId, userId, userEmail, encryptedConten
   const { data, error } = await supabase
     .from("comments")
     .insert({ post_id: postId, user_id: userId, user_email: userEmail, content: encryptedContent, content_iv: contentIv })
-    .select()
-    .single();
+    .select().single();
   if (error) throw error;
   return data;
 }
@@ -173,10 +179,52 @@ export async function deleteComment(commentId) {
 export function subscribeToComments(postId, onUpdate) {
   const channel = supabase
     .channel(`comments-${postId}`)
-    .on("postgres_changes", {
-      event: "*", schema: "public", table: "comments",
-      filter: `post_id=eq.${postId}`,
-    }, onUpdate)
+    .on("postgres_changes", { event: "*", schema: "public", table: "comments", filter: `post_id=eq.${postId}` }, onUpdate)
+    .subscribe();
+  return () => supabase.removeChannel(channel);
+}
+
+// ── Wishlists ──────────────────────────────────────────────────────────────
+
+export async function fetchWishlists() {
+  const { data, error } = await supabase
+    .from("wishlists")
+    .select("id, creator_id, creator_email, title, title_iv, description, description_iv, reward, reward_iv, required_count, is_complete, created_at")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function createWishlist({ creatorId, creatorEmail, encTitle, titleIv, encDescription, descriptionIv, encReward, rewardIv, requiredCount }) {
+  const { data, error } = await supabase
+    .from("wishlists")
+    .insert({ creator_id: creatorId, creator_email: creatorEmail, title: encTitle, title_iv: titleIv, description: encDescription ?? null, description_iv: descriptionIv ?? null, reward: encReward ?? null, reward_iv: rewardIv ?? null, required_count: requiredCount, is_complete: false })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function markWishlistComplete(wishlistId) {
+  const { error } = await supabase.from("wishlists").update({ is_complete: true }).eq("id", wishlistId);
+  if (error) throw error;
+}
+
+export async function deleteWishlist(wishlistId) {
+  const { error } = await supabase.from("wishlists").delete().eq("id", wishlistId);
+  if (error) throw error;
+}
+
+export async function fetchWishlistPostCount(wishlistId) {
+  const { count, error } = await supabase
+    .from("posts").select("id", { count: "exact", head: true }).eq("wishlist_id", wishlistId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+export function subscribeToWishlists(onUpdate) {
+  const channel = supabase
+    .channel("wishlists-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: "wishlists" }, onUpdate)
     .subscribe();
   return () => supabase.removeChannel(channel);
 }

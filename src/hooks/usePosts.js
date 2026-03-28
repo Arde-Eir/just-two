@@ -1,72 +1,84 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { fetchPosts, subscribeToPosts, fetchEncryptedBlob } from "../lib/api";
+import { fetchPostsByMonth, fetchPostMonths, subscribeToPosts, fetchEncryptedBlob } from "../lib/api";
 import { decryptText, decryptFileToUrl } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
 import { cachePlaintext, loadCachedPlaintext } from "../lib/plaintextCache";
 
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export function usePosts(encryptionReady) {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [monthKey, setMonthKey]         = useState(currentMonthKey());
+  const [months, setMonths]             = useState([]); // available month list
+  const [posts, setPosts]               = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [loadingMonths, setLoadingMonths] = useState(true);
+  const [error, setError]               = useState(null);
   const [newPostAlert, setNewPostAlert] = useState(false);
-  
-  const mediaCache = useRef({});
-  const mountedRef = useRef(true);
-  // Track if we actually have the shared key to prevent "false-negative" caching
-  const keys = getSessionKeys();
-  const hasSharedKey = !!keys?.sharedAesKey;
+  const mediaCache   = useRef({});
+  const mountedRef   = useRef(true);
+  const prevCount    = useRef(0);
+  const isFirstLoad  = useRef(true);
 
+  // Decrypt a single post with cache fallback
   const decryptPost = useCallback(async (post) => {
-    const currentKeys = getSessionKeys();
-    const decrypted = { ...post, _plainContent: null, _mediaObjectUrl: null };
+    const keys = getSessionKeys();
+    const dec  = { ...post, _plainContent: null, _mediaObjectUrl: null };
 
-    // ── Text content ──────────────────────────────────────────────────────
     if (post.content && post.content_iv) {
-      if (currentKeys?.sharedAesKey) {
+      if (keys?.sharedAesKey) {
         try {
-          const plain = await decryptText(post.content, post.content_iv, currentKeys.sharedAesKey);
-          decrypted._plainContent = plain;
+          const plain = await decryptText(post.content, post.content_iv, keys.sharedAesKey);
+          dec._plainContent = plain;
           await cachePlaintext(post.id, plain);
-        } catch (e) {
-          const cached = await loadCachedPlaintext(post.id);
-          decrypted._plainContent = cached ?? "[decryption failed]";
+        } catch {
+          dec._plainContent = (await loadCachedPlaintext(post.id)) ?? "[could not decrypt]";
         }
       } else {
-        const cached = await loadCachedPlaintext(post.id);
-        decrypted._plainContent = cached ?? "[waiting for shared key...]";
+        dec._plainContent = (await loadCachedPlaintext(post.id)) ?? "[could not decrypt]";
       }
     }
 
-    // ── Media ─────────────────────────────────────────────────────────────
     if (post.media_url && post.media_iv && post.media_mime) {
-      const inMemory = mediaCache.current[post.id];
-      if (inMemory) {
-        decrypted._mediaObjectUrl = inMemory;
-      } else if (currentKeys?.sharedAesKey) {
+      const cached = mediaCache.current[post.id];
+      if (cached) {
+        dec._mediaObjectUrl = cached;
+      } else if (keys?.sharedAesKey) {
         try {
-          const encBlob = await fetchEncryptedBlob(post.media_url);
-          // Fixed: ensure we pass the mimeType so photos/videos render correctly
-          const objectUrl = await decryptFileToUrl(encBlob, post.media_iv, currentKeys.sharedAesKey, post.media_mime);
-          mediaCache.current[post.id] = objectUrl;
-          decrypted._mediaObjectUrl = objectUrl;
-        } catch (e) {
-          console.error("Media decryption error:", e);
-          decrypted._mediaObjectUrl = null;
-        }
+          const encBlob  = await fetchEncryptedBlob(post.media_url);
+          const url      = await decryptFileToUrl(encBlob, post.media_iv, keys.sharedAesKey, post.media_mime);
+          mediaCache.current[post.id] = url;
+          dec._mediaObjectUrl = url;
+        } catch { dec._mediaObjectUrl = null; }
       }
     }
-
-    return decrypted;
+    return dec;
   }, []);
 
-  const refresh = useCallback(async () => {
-    // Don't block the fetch just because encryption isn't ready; 
-    // fetch the raw posts so we can decrypt them the moment keys arrive.
+  // Load month index
+  const loadMonths = useCallback(async () => {
+    try {
+      const data = await fetchPostMonths();
+      if (mountedRef.current) setMonths(data);
+    } catch {}
+    if (mountedRef.current) setLoadingMonths(false);
+  }, []);
+
+  // Load posts for the selected month
+  const refresh = useCallback(async (isBackground = false) => {
+    if (!encryptionReady) return;
     setError(null);
     try {
-      const raw = await fetchPosts();
+      const raw = await fetchPostsByMonth(monthKey);
       const decrypted = await Promise.all(raw.map(decryptPost));
       if (mountedRef.current) {
+        if (isBackground && !isFirstLoad.current && raw.length > prevCount.current) {
+          setNewPostAlert(true);
+        }
+        prevCount.current  = raw.length;
+        isFirstLoad.current = false;
         setPosts(decrypted);
       }
     } catch (err) {
@@ -74,30 +86,49 @@ export function usePosts(encryptionReady) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [decryptPost]);
+  }, [encryptionReady, monthKey, decryptPost]);
 
-  // Re-run decryption whenever encryptionReady OR the shared key status changes
+  // Switch month — clear media cache for old month
+  const goToMonth = useCallback((key) => {
+    Object.values(mediaCache.current).forEach(url => { try { URL.revokeObjectURL(url); } catch {} });
+    mediaCache.current = {};
+    setLoading(true);
+    setPosts([]);
+    prevCount.current  = 0;
+    isFirstLoad.current = true;
+    setMonthKey(key);
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
-    refresh();
+    loadMonths();
 
+    if (encryptionReady) { setLoading(true); refresh(false); }
+
+    // Real-time — only auto-refresh if viewing current month
     const unsubscribe = subscribeToPosts(() => {
-      if (mountedRef.current) refresh();
+      if (mountedRef.current && encryptionReady) {
+        loadMonths(); // refresh month index too
+        if (monthKey === currentMonthKey()) refresh(true);
+        else setNewPostAlert(true); // new post in a different month
+      }
     });
 
     return () => {
       mountedRef.current = false;
       unsubscribe();
-      // Only revoke if the component is actually unmounting
+      Object.values(mediaCache.current).forEach(url => { try { URL.revokeObjectURL(url); } catch {} });
+      mediaCache.current = {};
     };
-  }, [refresh, encryptionReady, hasSharedKey]); // added hasSharedKey here
+  }, [refresh, encryptionReady, loadMonths, monthKey]);
 
   return {
-    posts,
-    loading,
-    error,
-    refresh,
+    posts, loading, error,
+    months, loadingMonths,
+    monthKey, goToMonth,
+    refresh: () => refresh(false),
     newPostAlert,
     clearAlert: () => setNewPostAlert(false),
+    isCurrentMonth: monthKey === currentMonthKey(),
   };
 }

@@ -1,54 +1,75 @@
-/* ── Import fonts ───────────────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400;1,500&family=DM+Sans:wght@300;400;500&display=swap');
 
-/* ── CSS Reset & Base ───────────────────────────────────────────────────── */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Light theme (default) ───────────────────────────────────────────────── */
 :root {
-  /* Typography */
   --font-display: 'Lora', Georgia, serif;
   --font-body: 'DM Sans', system-ui, sans-serif;
 
-  /* Palette – warm neutral */
-  --color-bg:         #F5F3EE;
-  --color-surface:    #FFFFFF;
-  --color-surface-2:  #F0EDE6;
-  --color-border:     rgba(60, 52, 40, 0.12);
-  --color-border-md:  rgba(60, 52, 40, 0.22);
+  --color-bg:        #F5F3EE;
+  --color-surface:   #FFFFFF;
+  --color-surface-2: #F0EDE6;
+  --color-border:    rgba(60,52,40,0.10);
+  --color-border-md: rgba(60,52,40,0.20);
 
-  /* Text */
   --color-text-1: #1E1B16;
   --color-text-2: #6B6456;
   --color-text-3: #A39C91;
 
-  /* Accent */
-  --color-accent:       #3B6D11;
-  --color-accent-bg:    #EAF3DE;
-  --color-accent-text:  #27500A;
-  --color-danger:       #C0392B;
-  --color-danger-bg:    #FCEBEB;
-  --color-like:         #C0392B;
-  --color-like-active:  #E74C3C;
+  --color-accent:      #3B6D11;
+  --color-accent-bg:   #EAF3DE;
+  --color-accent-text: #27500A;
+  --color-danger:      #C0392B;
+  --color-danger-bg:   #FCEBEB;
+  --color-like:        #C0392B;
+  --color-like-active: #E74C3C;
 
-  /* Layout */
-  --radius-sm:  6px;
-  --radius-md:  10px;
-  --radius-lg:  14px;
-  --radius-xl:  20px;
+  --color-wish-bg:     #FDF6FF;
+  --color-wish-border: rgba(139,92,246,0.2);
+  --color-wish-accent: #7C3AED;
+  --color-wish-light:  #EDE9FE;
+
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-xl:   20px;
   --radius-full: 999px;
 
-  /* Shadows */
-  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-card:  0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
   --shadow-focus: 0 0 0 3px rgba(59,109,17,0.25);
-
-  /* Motion */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out:     cubic-bezier(0.22,1,0.36,1);
   --duration-fast: 140ms;
   --duration-mid:  220ms;
+}
+
+/* ── Dark theme ──────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --color-bg:        #0F0F0F;
+  --color-surface:   #1A1A1A;
+  --color-surface-2: #242424;
+  --color-border:    rgba(255,255,255,0.07);
+  --color-border-md: rgba(255,255,255,0.13);
+
+  --color-text-1: #F0EDE8;
+  --color-text-2: #9A9288;
+  --color-text-3: #5A5450;
+
+  --color-accent:      #7CBA3C;
+  --color-accent-bg:   #1A2E0A;
+  --color-accent-text: #A8D96A;
+  --color-danger:      #FF6B6B;
+  --color-danger-bg:   #2A1010;
+  --color-like:        #FF6B6B;
+  --color-like-active: #FF4444;
+
+  --color-wish-bg:     #1A0F2E;
+  --color-wish-border: rgba(139,92,246,0.3);
+  --color-wish-accent: #A78BFA;
+  --color-wish-light:  #2D1F4E;
+
+  --shadow-card:  0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-focus: 0 0 0 3px rgba(124,186,60,0.3);
 }
 
 html, body, #root {
@@ -59,48 +80,25 @@ html, body, #root {
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  transition: background 0.25s ease, color 0.25s ease;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-border-md); border-radius: var(--radius-full); }
 
-/* Focus ring */
-:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
-}
+:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
 
-/* Inputs reset */
-input, textarea, button, select {
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-}
-
+input, textarea, button, select { font-family: inherit; font-size: inherit; color: inherit; }
 button { cursor: pointer; }
-
 a { color: var(--color-accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
 
-/* ── Utility classes ────────────────────────────────────────────────────── */
-.sr-only {
-  position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
-  overflow: hidden;
-  clip: rect(0,0,0,0);
-  white-space: nowrap;
-  border: 0;
-}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
-/* Fade-in animation */
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.fade-up {
-  animation: fadeUp var(--duration-mid) var(--ease-out) both;
-}
+@keyframes fadeUp   { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes pulse    { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.85); } }
+@keyframes slideIn  { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+
+.fade-up  { animation: fadeUp  var(--duration-mid) var(--ease-out) both; }
+.slide-in { animation: slideIn 0.2s var(--ease-out) both; }
