@@ -5,6 +5,7 @@ import { PostCard } from "../components/PostCard";
 import { Header } from "../components/Header";
 import { WishlistPage } from "./WishlistPage";
 import { ArchivePage } from "./ArchivePage";
+import { TrackerPage } from "./TrackerPage";
 import { Spinner, ErrorBanner } from "../components/UI";
 
 const FeedIcon = () => (
@@ -27,11 +28,17 @@ const ArchiveIcon = () => (
     <line x1="10" y1="12" x2="14" y2="12"/>
   </svg>
 );
+const TrackerIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+  </svg>
+);
 
 const TABS = [
-  { id: "feed",    label: "feed",    Icon: FeedIcon },
-  { id: "wishlist",label: "wishlists", Icon: GiftIcon },
-  { id: "archive", label: "archive", Icon: ArchiveIcon },
+  { id: "feed",     label: "feed",      Icon: FeedIcon },
+  { id: "tracker",  label: "trackers",  Icon: TrackerIcon },
+  { id: "wishlist", label: "wishlists", Icon: GiftIcon },
+  { id: "archive",  label: "archive",   Icon: ArchiveIcon },
 ];
 
 export function FeedPage({ user, theme, onToggleTheme }) {
@@ -70,7 +77,6 @@ export function FeedPage({ user, theme, onToggleTheme }) {
       {/* ── FEED TAB ── */}
       {tab === "feed" && (
         <main style={s.main}>
-          {/* Month navigation strip */}
           {months.length > 1 && (
             <div style={s.monthStrip}>
               {months.map(m => (
@@ -83,7 +89,6 @@ export function FeedPage({ user, theme, onToggleTheme }) {
             </div>
           )}
 
-          {/* Only show compose box for current month */}
           {isCurrentMonth && <ComposeBox user={user} onPost={refresh} />}
           {!isCurrentMonth && (
             <div style={s.archiveNotice}>
@@ -111,8 +116,8 @@ export function FeedPage({ user, theme, onToggleTheme }) {
         </main>
       )}
 
+      {tab === "tracker" && <TrackerPage user={user} />}
       {tab === "wishlist" && <WishlistPage user={user} />}
-
       {tab === "archive" && (
         <ArchivePage
           months={months}
@@ -128,8 +133,8 @@ export function FeedPage({ user, theme, onToggleTheme }) {
 const s = {
   page: { minHeight: "100vh", background: "var(--color-bg)", transition: "background 0.25s ease" },
   main: { maxWidth: 620, margin: "0 auto", padding: "20px 16px 60px" },
-  tabBar: { display: "flex", alignItems: "center", padding: "0 8px", borderBottom: "0.5px solid var(--color-border-md)", background: "var(--color-surface)", transition: "background 0.25s ease" },
-  tab: { display: "inline-flex", alignItems: "center", gap: 6, padding: "12px 14px", background: "none", border: "none", fontSize: 13, fontFamily: "var(--font-display)", fontStyle: "italic", color: "var(--color-text-3)", cursor: "pointer", borderBottom: "2px solid transparent", marginBottom: -1, transition: "color var(--duration-fast), border-color var(--duration-fast)", whiteSpace: "nowrap" },
+  tabBar: { display: "flex", alignItems: "center", padding: "0 8px", borderBottom: "0.5px solid var(--color-border-md)", background: "var(--color-surface)", transition: "background 0.25s ease", overflowX: "auto" },
+  tab: { display: "inline-flex", alignItems: "center", gap: 6, padding: "12px 12px", background: "none", border: "none", fontSize: 13, fontFamily: "var(--font-display)", fontStyle: "italic", color: "var(--color-text-3)", cursor: "pointer", borderBottom: "2px solid transparent", marginBottom: -1, transition: "color var(--duration-fast), border-color var(--duration-fast)", whiteSpace: "nowrap", flexShrink: 0 },
   tabActive: { color: "var(--color-text-1)", borderBottomColor: "var(--color-text-1)" },
 
   monthStrip: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 12, marginBottom: 4, scrollbarWidth: "none" },

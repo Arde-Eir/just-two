@@ -28,25 +28,27 @@ const CommentIcon = () => (
   </svg>
 );
 
+// Storage key for tracking seen comment counts per post
+function seenKey(postId) { return `jut_seen_comments_${postId}`; }
+
+function getSeenCount(postId) {
+  try { return parseInt(localStorage.getItem(seenKey(postId)) || "0", 10); } catch { return 0; }
+}
+
+function saveSeenCount(postId, count) {
+  try { localStorage.setItem(seenKey(postId), String(count)); } catch {}
+}
+
 // ── Video Player Component ───────────────────────────────────────────────
-function VideoPlayer({ url, mimeType }) {
+function VideoPlayer({ url }) {
   if (!url) return (
     <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-3)', fontSize: 12 }}>
       decrypting video...
     </div>
   );
-
-  return (
-    <video
-      key={url}
-      controls
-      playsInline
-      src={url}
-      style={s.media}
-      preload="auto"
-    />
-  );
+  return <video key={url} controls playsInline src={url} style={s.media} preload="auto" />;
 }
+
 // ── Comment Item ──────────────────────────────────────────────────────────
 function CommentItem({ comment, currentUser, onDelete }) {
   const isOwn = comment.user_id === currentUser.id;
@@ -68,7 +70,7 @@ function CommentItem({ comment, currentUser, onDelete }) {
 }
 
 // ── Comment Section ───────────────────────────────────────────────────────
-function CommentSection({ postId, currentUser }) {
+function CommentSection({ postId, currentUser, onCountChange }) {
   const [comments, setComments] = useState([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -94,11 +96,12 @@ function CommentSection({ postId, currentUser }) {
       const raw = await fetchComments(postId);
       const decrypted = await decryptComments(raw);
       setComments(decrypted);
+      onCountChange?.(decrypted.length);
     } catch {
       setError("Failed to load comments.");
     }
     setLoading(false);
-  }, [postId, decryptComments]);
+  }, [postId, decryptComments, onCountChange]);
 
   useEffect(() => {
     loadComments();
@@ -115,13 +118,7 @@ function CommentSection({ postId, currentUser }) {
     setError("");
     try {
       const { cipherB64, ivB64 } = await encryptText(text.trim(), keys.sharedAesKey);
-      await createComment({
-        postId,
-        userId: currentUser.id,
-        userEmail: currentUser.email,
-        encryptedContent: cipherB64,
-        contentIv: ivB64,
-      });
+      await createComment({ postId, userId: currentUser.id, userEmail: currentUser.email, encryptedContent: cipherB64, contentIv: ivB64 });
       setText("");
       await loadComments();
     } catch {
@@ -133,7 +130,9 @@ function CommentSection({ postId, currentUser }) {
   async function handleDeleteComment(commentId) {
     try {
       await deleteComment(commentId);
-      setComments(prev => prev.filter(c => c.id !== commentId));
+      const newComments = comments.filter(c => c.id !== commentId);
+      setComments(newComments);
+      onCountChange?.(newComments.length);
     } catch {
       setError("Failed to delete comment.");
     }
@@ -142,7 +141,6 @@ function CommentSection({ postId, currentUser }) {
   return (
     <div style={s.commentSection}>
       {error && <ErrorBanner message={error} onDismiss={() => setError("")} />}
-
       {loading ? (
         <p style={s.commentLoading}>loading comments...</p>
       ) : comments.length > 0 ? (
@@ -154,7 +152,6 @@ function CommentSection({ postId, currentUser }) {
       ) : (
         <p style={s.noComments}>no comments yet</p>
       )}
-
       <form onSubmit={handleSubmit} style={s.commentForm}>
         <Avatar email={currentUser.email} size={26} />
         <input
@@ -179,9 +176,7 @@ function CommentSection({ postId, currentUser }) {
 
 // ── Post Card ─────────────────────────────────────────────────────────────
 export function PostCard({ post, currentUser, onRefresh }) {
-  // Always derive a safe likes array from the post prop
   const initialLikes = Array.isArray(post.likes) ? post.likes : [];
-
   const [localLikes, setLocalLikes] = useState(initialLikes);
   const [likeLoading, setLikeLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -189,54 +184,65 @@ export function PostCard({ post, currentUser, onRefresh }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [commentCount, setCommentCount] = useState(post._commentCount ?? 0);
+  const [hasNewComments, setHasNewComments] = useState(false);
 
-  // Keep localLikes in sync when post prop changes (e.g. after refresh)
   useEffect(() => {
     setLocalLikes(Array.isArray(post.likes) ? post.likes : []);
   }, [post.likes]);
+
+  // Check for new/unseen comments on mount
+  useEffect(() => {
+    const seen = getSeenCount(post.id);
+    const total = post._commentCount ?? 0;
+    setCommentCount(total);
+    if (total > seen) setHasNewComments(true);
+  }, [post.id, post._commentCount]);
 
   const liked = localLikes.includes(currentUser.id);
   const displayContent = post._plainContent;
   const mediaUrl = post._mediaObjectUrl;
 
-  // Esc key listener for fullscreen
   useEffect(() => {
-    const handleEsc = (e) => {
-      if (e.key === 'Escape') setIsMaximized(false);
-    };
-    if (isMaximized) {
-      window.addEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'hidden';
-    }
-    return () => {
-      window.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'unset';
-    };
+    const handleEsc = (e) => { if (e.key === 'Escape') setIsMaximized(false); };
+    if (isMaximized) { window.addEventListener('keydown', handleEsc); document.body.style.overflow = 'hidden'; }
+    return () => { window.removeEventListener('keydown', handleEsc); document.body.style.overflow = 'unset'; };
   }, [isMaximized]);
 
-  async function handleLike() {
-    // Prevent double-clicks
-    if (likeLoading) return;
+  function handleToggleComments() {
+    setShowComments(v => !v);
+    if (!showComments) {
+      // Mark as seen when opening
+      setHasNewComments(false);
+      saveSeenCount(post.id, commentCount);
+    }
+  }
 
-    // Optimistic update — flip the like immediately
+  function handleCommentCountChange(newCount) {
+    setCommentCount(newCount);
+    if (showComments) {
+      saveSeenCount(post.id, newCount);
+      setHasNewComments(false);
+    } else if (newCount > getSeenCount(post.id)) {
+      setHasNewComments(true);
+    }
+  }
+
+  async function handleLike() {
+    if (likeLoading) return;
     const optimisticLikes = liked
       ? localLikes.filter((id) => id !== currentUser.id)
       : [...localLikes, currentUser.id];
-
     setLocalLikes(optimisticLikes);
     setLikeLoading(true);
     setError("");
-
     try {
       const serverLikes = await toggleLike(post.id, localLikes, currentUser.id);
-      // Reconcile with server truth
       setLocalLikes(Array.isArray(serverLikes) ? serverLikes : optimisticLikes);
-      // Soft refresh in background (don't block UI)
       onRefresh?.();
     } catch (err) {
-      // Roll back optimistic update
       setLocalLikes(initialLikes);
-      setError(err.message || "Failed to update like. Please try again.");
+      setError(err.message || "Failed to update like.");
     } finally {
       setLikeLoading(false);
     }
@@ -262,7 +268,6 @@ export function PostCard({ post, currentUser, onRefresh }) {
 
   return (
     <>
-      {/* Fullscreen overlay */}
       {isMaximized && (
         <div style={s.overlay} onClick={() => setIsMaximized(false)}>
           <img src={mediaUrl} style={s.maximizedImage} alt="Fullscreen view" />
@@ -308,7 +313,7 @@ export function PostCard({ post, currentUser, onRefresh }) {
 
         {mediaUrl && post.media_type === "video" && (
           <div style={s.mediaWrap}>
-            <VideoPlayer url={mediaUrl} mimeType={post.media_mime} />
+            <VideoPlayer url={mediaUrl} />
           </div>
         )}
 
@@ -316,7 +321,6 @@ export function PostCard({ post, currentUser, onRefresh }) {
 
         <div style={s.footer}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {/* Like button — optimistic, never crashes */}
             <button
               onClick={handleLike}
               disabled={likeLoading}
@@ -331,28 +335,47 @@ export function PostCard({ post, currentUser, onRefresh }) {
               }}
             >
               <HeartIcon filled={liked} />
-              <span style={{ fontSize: 13 }}>
-                {localLikes.length > 0 ? localLikes.length : ""}
-              </span>
+              <span style={{ fontSize: 13 }}>{localLikes.length > 0 ? localLikes.length : ""}</span>
             </button>
 
+            {/* Comment button with badge */}
             <button
-              onClick={() => setShowComments(v => !v)}
+              onClick={handleToggleComments}
               style={{
                 ...s.actionBtn,
                 color: showComments ? "var(--color-accent)" : "var(--color-text-3)",
                 marginLeft: 4,
+                position: "relative",
               }}
             >
               <CommentIcon />
-              <span style={{ fontSize: 13 }}>{showComments ? "hide" : "comment"}</span>
+              <span style={{ fontSize: 13 }}>
+                {showComments ? "hide" : "comment"}
+              </span>
+              {/* Count badge */}
+              {commentCount > 0 && (
+                <span style={{
+                  ...s.countBadge,
+                  background: hasNewComments ? "var(--color-like-active)" : "var(--color-text-3)",
+                }}>
+                  {commentCount}
+                </span>
+              )}
+              {/* New dot indicator when comments section is closed */}
+              {hasNewComments && !showComments && commentCount === 0 && (
+                <span style={s.newDot} />
+              )}
             </button>
           </div>
           <span style={s.encBadge}>🔒 e2e encrypted</span>
         </div>
 
         {showComments && (
-          <CommentSection postId={post.id} currentUser={currentUser} />
+          <CommentSection
+            postId={post.id}
+            currentUser={currentUser}
+            onCountChange={handleCommentCountChange}
+          />
         )}
       </article>
     </>
@@ -371,12 +394,24 @@ const s = {
   actionBtn: { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)", fontSize: 13 },
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
 
-  // Fullscreen overlay
+  // Comment count badge
+  countBadge: {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    minWidth: 17, height: 17, borderRadius: "var(--radius-full)",
+    fontSize: 10, fontWeight: 500, color: "#fff",
+    padding: "0 4px", marginLeft: 2,
+    transition: "background 0.2s ease",
+  },
+  newDot: {
+    position: "absolute", top: 2, right: 2,
+    width: 7, height: 7, borderRadius: "50%",
+    background: "var(--color-like-active)",
+  },
+
   overlay: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.96)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out', margin: 0, padding: 0 },
-  maximizedImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', userSelect: 'none', boxShadow: '0 0 50px rgba(0,0,0,0.5)' },
+  maximizedImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', userSelect: 'none' },
   closeBtn: { position: 'absolute', top: 24, right: 24, background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', borderRadius: '50%', width: 36, height: 36, fontSize: 18, cursor: 'pointer', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 
-  // Comments
   commentSection: { marginTop: 12, paddingTop: 12, borderTop: "0.5px solid var(--color-border)" },
   commentList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 },
   comment: { display: "flex", flexDirection: "column", gap: 4 },

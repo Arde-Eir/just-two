@@ -30,6 +30,11 @@
   --color-wish-accent: #7C3AED;
   --color-wish-light:  #EDE9FE;
 
+  --color-spicy-bg:     #FFF5F5;
+  --color-spicy-border: rgba(220, 60, 60, 0.2);
+  --color-spicy-accent: #DC3C3C;
+  --color-spicy-light:  #FFE4E4;
+
   --radius-sm:   6px;
   --radius-md:   10px;
   --radius-lg:   14px;
@@ -67,6 +72,11 @@
   --color-wish-border: rgba(139,92,246,0.3);
   --color-wish-accent: #A78BFA;
   --color-wish-light:  #2D1F4E;
+
+  --color-spicy-bg:     #1E0808;
+  --color-spicy-border: rgba(220, 60, 60, 0.3);
+  --color-spicy-accent: #FF6B6B;
+  --color-spicy-light:  #3A1010;
 
   --shadow-card:  0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
   --shadow-focus: 0 0 0 3px rgba(124,186,60,0.3);
