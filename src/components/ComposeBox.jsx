@@ -38,7 +38,7 @@ export function ComposeBox({ user, onPost }) {
   const [progress, setProgress]   = useState(0);
 
   // Wishlist tagging
-  const [wishlists, setWishlists]       = useState([]);
+  const [wishlists, setWishlists]           = useState([]);
   const [selectedWishlist, setSelectedWishlist] = useState("");
   const [showWishlistPicker, setShowWishlistPicker] = useState(false);
 
@@ -155,16 +155,25 @@ export function ComposeBox({ user, onPost }) {
     <div style={s.card}>
       <div style={s.row}>
         <Avatar email={user.email} size={38} />
-        <textarea style={s.textarea} placeholder="what's on your mind?" value={text}
-          onChange={e => setText(e.target.value)} maxLength={MAX_POST_CHARS + 10}
-          rows={3} disabled={loading} aria-label="Post content" />
+        <textarea
+          style={s.textarea}
+          placeholder="what's on your mind?"
+          value={text}
+          onChange={e => setText(e.target.value)}
+          maxLength={MAX_POST_CHARS + 10}
+          rows={3}
+          disabled={loading}
+          aria-label="Post content"
+        />
       </div>
 
       {/* Wishlist tag badge */}
       {selectedWishlistObj && (
         <div style={s.wishlistTag}>
           <GiftIcon />
-          <span style={{ flex: 1, fontSize: 12 }}>tagging: <strong>{selectedWishlistObj._plainTitle}</strong></span>
+          <span style={{ flex: 1, fontSize: 12 }}>
+            tagging: <strong>{selectedWishlistObj._plainTitle}</strong>
+          </span>
           <button style={s.removeTag} onClick={() => setSelectedWishlist("")}>✕</button>
         </div>
       )}
@@ -174,10 +183,14 @@ export function ComposeBox({ user, onPost }) {
         <div style={s.wishlistPicker}>
           <p style={s.pickerLabel}>tag this post to a wishlist goal:</p>
           {wishlists.map(w => (
-            <button key={w.id} style={{
-              ...s.pickerItem,
-              background: selectedWishlist === w.id ? "var(--color-wish-light)" : "transparent",
-            }} onClick={() => { setSelectedWishlist(w.id); setShowWishlistPicker(false); }}>
+            <button
+              key={w.id}
+              style={{
+                ...s.pickerItem,
+                background: selectedWishlist === w.id ? "var(--color-wish-light)" : "transparent",
+              }}
+              onClick={() => { setSelectedWishlist(w.id); setShowWishlistPicker(false); }}
+            >
               <GiftIcon />
               <span style={{ fontSize: 13 }}>{w._plainTitle}</span>
               <span style={s.pickerCount}>{w.required_count} needed</span>
@@ -197,7 +210,9 @@ export function ComposeBox({ user, onPost }) {
       )}
 
       {progress > 0 && progress < 100 && (
-        <div style={s.progressTrack}><div style={{ ...s.progressBar, width: `${progress}%` }} /></div>
+        <div style={s.progressTrack}>
+          <div style={{ ...s.progressBar, width: `${progress}%` }} />
+        </div>
       )}
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
@@ -208,14 +223,22 @@ export function ComposeBox({ user, onPost }) {
           <Button variant="icon" title="Attach file" onClick={() => fileRef.current?.click()} disabled={loading}>
             <AttachIcon />
           </Button>
-          <input ref={fileRef} type="file"
+          <input
+            ref={fileRef}
+            type="file"
             accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
-            style={{ display: "none" }} onChange={handleFileChange} />
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
 
-          {/* Wishlist tag button — only show if there are active wishlists */}
           {wishlists.length > 0 && (
-            <Button variant="icon" title="Tag a wishlist goal" onClick={() => setShowWishlistPicker(v => !v)} disabled={loading}
-              style={{ color: selectedWishlist ? "var(--color-wish-accent)" : "var(--color-text-3)" }}>
+            <Button
+              variant="icon"
+              title="Tag a wishlist goal"
+              onClick={() => setShowWishlistPicker(v => !v)}
+              disabled={loading}
+              style={{ color: selectedWishlist ? "var(--color-wish-accent)" : "var(--color-text-3)" }}
+            >
               <GiftIcon />
             </Button>
           )}
@@ -227,8 +250,14 @@ export function ComposeBox({ user, onPost }) {
           <span style={s.lockBadge} title="End-to-end encrypted">
             <LockIcon /> encrypted
           </span>
-          <Button variant="primary" size="sm" onClick={handleSubmit} disabled={!canPost} loading={loading}
-            style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSubmit}
+            disabled={!canPost}
+            loading={loading}
+            style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+          >
             post
           </Button>
         </div>
@@ -238,24 +267,90 @@ export function ComposeBox({ user, onPost }) {
 }
 
 const s = {
-  card: { background: "var(--color-surface)", border: "0.5px solid var(--color-border-md)", borderRadius: "var(--radius-lg)", padding: 16, marginBottom: 20, boxShadow: "var(--shadow-card)" },
+  card: {
+    background: "var(--color-surface)",
+    border: "0.5px solid var(--color-border-md)",
+    borderRadius: "var(--radius-lg)",
+    padding: 16, marginBottom: 20,
+    boxShadow: "var(--shadow-card)",
+  },
   row: { display: "flex", gap: 12, alignItems: "flex-start" },
-  textarea: { flex: 1, border: "none", outline: "none", resize: "none", fontSize: 15, fontFamily: "var(--font-display)", fontStyle: "italic", color: "var(--color-text-1)", background: "transparent", lineHeight: 1.65, minHeight: 72 },
+  textarea: {
+    flex: 1, border: "none", outline: "none", resize: "none",
+    fontSize: 15, fontFamily: "var(--font-display)", fontStyle: "italic",
+    color: "var(--color-text-1)", background: "transparent",
+    lineHeight: 1.65, minHeight: 72,
+  },
 
-  wishlistTag: { display: "flex", alignItems: "center", gap: 8, background: "var(--color-wish-light)", border: "0.5px solid var(--color-wish-border)", borderRadius: "var(--radius-md)", padding: "6px 10px", marginTop: 8, color: "var(--color-wish-accent)" },
-  removeTag: { background: "none", border: "none", cursor: "pointer", color: "var(--color-text-3)", fontSize: 12, padding: 2, lineHeight: 1 },
+  wishlistTag: {
+    display: "flex", alignItems: "center", gap: 8,
+    background: "var(--color-wish-light)",
+    border: "0.5px solid var(--color-wish-border)",
+    borderRadius: "var(--radius-md)",
+    padding: "6px 10px", marginTop: 8,
+    color: "var(--color-wish-accent)",
+  },
+  removeTag: {
+    background: "none", border: "none", cursor: "pointer",
+    color: "var(--color-text-3)", fontSize: 12, padding: 2, lineHeight: 1,
+  },
 
-  wishlistPicker: { background: "var(--color-surface)", border: "0.5px solid var(--color-wish-border)", borderRadius: "var(--radius-md)", padding: 10, marginTop: 8, display: "flex", flexDirection: "column", gap: 4 },
-  pickerLabel: { fontSize: 11, color: "var(--color-text-3)", margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.05em" },
-  pickerItem: { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", color: "var(--color-text-1)", textAlign: "left", width: "100%" },
+  wishlistPicker: {
+    background: "var(--color-surface)",
+    border: "0.5px solid var(--color-wish-border)",
+    borderRadius: "var(--radius-md)",
+    padding: 10, marginTop: 8,
+    display: "flex", flexDirection: "column", gap: 4,
+  },
+  pickerLabel: {
+    fontSize: 11, color: "var(--color-text-3)", margin: "0 0 4px",
+    textTransform: "uppercase", letterSpacing: "0.05em",
+  },
+  pickerItem: {
+    display: "flex", alignItems: "center", gap: 8,
+    padding: "8px 10px", borderRadius: "var(--radius-sm)",
+    border: "none", cursor: "pointer",
+    color: "var(--color-text-1)", textAlign: "left", width: "100%",
+  },
   pickerCount: { marginLeft: "auto", fontSize: 11, color: "var(--color-text-3)" },
-  pickerCancel: { background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--color-text-3)", padding: "4px 0", alignSelf: "flex-end" },
+  pickerCancel: {
+    background: "none", border: "none", cursor: "pointer",
+    fontSize: 12, color: "var(--color-text-3)",
+    padding: "4px 0", alignSelf: "flex-end",
+  },
 
-  previewWrap: { position: "relative", marginTop: 10, borderRadius: "var(--radius-md)", overflow: "hidden", border: "0.5px solid var(--color-border)" },
+  previewWrap: {
+    position: "relative", marginTop: 10,
+    borderRadius: "var(--radius-md)", overflow: "hidden",
+    border: "0.5px solid var(--color-border)",
+  },
   previewMedia: { width: "100%", maxHeight: 280, objectFit: "cover", display: "block" },
-  removeBtn: { position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.55)", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" },
-  progressTrack: { height: 3, background: "var(--color-border)", borderRadius: 99, overflow: "hidden", marginTop: 8 },
-  progressBar: { height: "100%", background: "var(--color-accent)", borderRadius: 99, transition: "width 0.3s ease" },
-  actions: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
-  lockBadge: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--color-accent-text)", background: "var(--color-accent-bg)", padding: "3px 8px", borderRadius: "var(--radius-full)", fontWeight: 500 },
+  removeBtn: {
+    position: "absolute", top: 8, right: 8,
+    background: "rgba(0,0,0,0.55)", color: "#fff",
+    border: "none", borderRadius: "50%",
+    width: 28, height: 28, cursor: "pointer", fontSize: 12,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  progressTrack: {
+    height: 3, background: "var(--color-border)",
+    borderRadius: 99, overflow: "hidden", marginTop: 8,
+  },
+  progressBar: {
+    height: "100%", background: "var(--color-accent)",
+    borderRadius: 99, transition: "width 0.3s ease",
+  },
+  actions: {
+    display: "flex", justifyContent: "space-between",
+    alignItems: "center", marginTop: 8,
+  },
+  lockBadge: {
+    display: "inline-flex", alignItems: "center", gap: 4,
+    fontSize: 11,
+    color: "var(--color-accent-text)",
+    background: "var(--color-accent-bg)",
+    padding: "3px 8px",
+    borderRadius: "var(--radius-full)",
+    fontWeight: 500,
+  },
 };

@@ -17,6 +17,9 @@
   --color-text-2: #6B6456;
   --color-text-3: #A39C91;
 
+  /* Used for text ON a --color-text-1 background (buttons, chips, banners) */
+  --color-on-text-1: #ffffff;
+
   --color-accent:      #3B6D11;
   --color-accent-bg:   #EAF3DE;
   --color-accent-text: #27500A;
@@ -59,6 +62,9 @@
   --color-text-1: #F0EDE8;
   --color-text-2: #9A9288;
   --color-text-3: #5A5450;
+
+  /* On dark theme, --color-text-1 is near-white, so text on top should be dark */
+  --color-on-text-1: #0F0F0F;
 
   --color-accent:      #7CBA3C;
   --color-accent-bg:   #1A2E0A;

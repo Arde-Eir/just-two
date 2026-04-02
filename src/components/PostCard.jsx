@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { deletePost, deleteMedia, toggleLike, fetchComments, createComment, deleteComment, subscribeToComments } from "../lib/api";
 import { encryptText, decryptText } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
@@ -28,18 +28,23 @@ const CommentIcon = () => (
   </svg>
 );
 
-// Storage key for tracking seen comment counts per post
-function seenKey(postId) { return `jut_seen_comments_${postId}`; }
+// Inject pulse keyframe once
+if (typeof document !== "undefined" && !document.getElementById("jut-badge-pulse")) {
+  const st = document.createElement("style");
+  st.id = "jut-badge-pulse";
+  st.textContent = `@keyframes badgePulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.3);opacity:0.8} }`;
+  document.head.appendChild(st);
+}
 
+function seenKey(postId) { return `jut_seen_comments_${postId}`; }
 function getSeenCount(postId) {
   try { return parseInt(localStorage.getItem(seenKey(postId)) || "0", 10); } catch { return 0; }
 }
-
 function saveSeenCount(postId, count) {
   try { localStorage.setItem(seenKey(postId), String(count)); } catch {}
 }
 
-// ── Video Player Component ───────────────────────────────────────────────
+// ── Video Player ─────────────────────────────────────────────────────────
 function VideoPlayer({ url }) {
   if (!url) return (
     <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-3)', fontSize: 12 }}>
@@ -118,7 +123,13 @@ function CommentSection({ postId, currentUser, onCountChange }) {
     setError("");
     try {
       const { cipherB64, ivB64 } = await encryptText(text.trim(), keys.sharedAesKey);
-      await createComment({ postId, userId: currentUser.id, userEmail: currentUser.email, encryptedContent: cipherB64, contentIv: ivB64 });
+      await createComment({
+        postId,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        encryptedContent: cipherB64,
+        contentIv: ivB64,
+      });
       setText("");
       await loadComments();
     } catch {
@@ -164,7 +175,10 @@ function CommentSection({ postId, currentUser, onCountChange }) {
         />
         <button
           type="submit"
-          style={{ ...s.commentSubmit, opacity: (!text.trim() || submitting) ? 0.45 : 1 }}
+          style={{
+            ...s.commentSubmit,
+            opacity: (!text.trim() || submitting) ? 0.45 : 1,
+          }}
           disabled={!text.trim() || submitting}
         >
           {submitting ? "..." : "send"}
@@ -191,7 +205,6 @@ export function PostCard({ post, currentUser, onRefresh }) {
     setLocalLikes(Array.isArray(post.likes) ? post.likes : []);
   }, [post.likes]);
 
-  // Check for new/unseen comments on mount
   useEffect(() => {
     const seen = getSeenCount(post.id);
     const total = post._commentCount ?? 0;
@@ -205,14 +218,19 @@ export function PostCard({ post, currentUser, onRefresh }) {
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') setIsMaximized(false); };
-    if (isMaximized) { window.addEventListener('keydown', handleEsc); document.body.style.overflow = 'hidden'; }
-    return () => { window.removeEventListener('keydown', handleEsc); document.body.style.overflow = 'unset'; };
+    if (isMaximized) {
+      window.addEventListener('keydown', handleEsc);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      window.removeEventListener('keydown', handleEsc);
+      document.body.style.overflow = 'unset';
+    };
   }, [isMaximized]);
 
   function handleToggleComments() {
     setShowComments(v => !v);
     if (!showComments) {
-      // Mark as seen when opening
       setHasNewComments(false);
       saveSeenCount(post.id, commentCount);
     }
@@ -265,6 +283,9 @@ export function PostCard({ post, currentUser, onRefresh }) {
       setDeleteLoading(false);
     }
   }
+
+  // True when there are unseen comments and the section is closed
+  const alertActive = hasNewComments && !showComments;
 
   return (
     <>
@@ -338,32 +359,36 @@ export function PostCard({ post, currentUser, onRefresh }) {
               <span style={{ fontSize: 13 }}>{localLikes.length > 0 ? localLikes.length : ""}</span>
             </button>
 
-            {/* Comment button with badge */}
+            {/* Comment button — badge always visible, pulses red when there are unseen comments */}
             <button
               onClick={handleToggleComments}
               style={{
                 ...s.actionBtn,
-                color: showComments ? "var(--color-accent)" : "var(--color-text-3)",
                 marginLeft: 4,
                 position: "relative",
+                color: showComments
+                  ? "var(--color-accent)"
+                  : alertActive
+                    ? "var(--color-like-active)"
+                    : "var(--color-text-3)",
+                transition: "color 140ms",
               }}
             >
               <CommentIcon />
               <span style={{ fontSize: 13 }}>
                 {showComments ? "hide" : "comment"}
               </span>
-              {/* Count badge */}
+
+              {/* Badge: always shown when commentCount > 0, red+pulsing when unseen */}
               {commentCount > 0 && (
                 <span style={{
                   ...s.countBadge,
-                  background: hasNewComments ? "var(--color-like-active)" : "var(--color-text-3)",
+                  background: alertActive ? "var(--color-like-active)" : "var(--color-text-3)",
+                  animation: alertActive ? "badgePulse 1.8s ease-in-out infinite" : "none",
+                  transformOrigin: "center",
                 }}>
                   {commentCount}
                 </span>
-              )}
-              {/* New dot indicator when comments section is closed */}
-              {hasNewComments && !showComments && commentCount === 0 && (
-                <span style={s.newDot} />
               )}
             </button>
           </div>
@@ -383,18 +408,39 @@ export function PostCard({ post, currentUser, onRefresh }) {
 }
 
 const s = {
-  card: { background: "var(--color-surface)", border: "0.5px solid var(--color-border-md)", borderRadius: "var(--radius-lg)", padding: "14px 16px", marginBottom: 12, boxShadow: "var(--shadow-card)", position: 'relative' },
+  card: {
+    background: "var(--color-surface)",
+    border: "0.5px solid var(--color-border-md)",
+    borderRadius: "var(--radius-lg)",
+    padding: "14px 16px", marginBottom: 12,
+    boxShadow: "var(--shadow-card)", position: 'relative',
+  },
   header: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 },
   email: { fontSize: 13, fontWeight: 500, color: "var(--color-text-1)", margin: 0 },
   time: { fontSize: 12, color: "var(--color-text-3)", display: "block", marginTop: 2 },
-  content: { fontSize: 15, fontFamily: "var(--font-display)", lineHeight: 1.7, color: "var(--color-text-1)", margin: "0 0 12px", whiteSpace: "pre-wrap", wordBreak: "break-word" },
-  mediaWrap: { borderRadius: "var(--radius-md)", overflow: "hidden", border: "0.5px solid var(--color-border)", marginBottom: 10, background: "var(--color-surface-2)" },
+  content: {
+    fontSize: 15, fontFamily: "var(--font-display)", lineHeight: 1.7,
+    color: "var(--color-text-1)", margin: "0 0 12px",
+    whiteSpace: "pre-wrap", wordBreak: "break-word",
+  },
+  mediaWrap: {
+    borderRadius: "var(--radius-md)", overflow: "hidden",
+    border: "0.5px solid var(--color-border)", marginBottom: 10,
+    background: "var(--color-surface-2)",
+  },
   media: { width: "100%", maxHeight: 500, display: "block", objectFit: 'cover' },
-  footer: { display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8, borderTop: "0.5px solid var(--color-border)" },
-  actionBtn: { display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: "var(--radius-sm)", fontFamily: "var(--font-body)", fontSize: 13 },
+  footer: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    paddingTop: 8, borderTop: "0.5px solid var(--color-border)",
+  },
+  actionBtn: {
+    display: "inline-flex", alignItems: "center", gap: 5,
+    background: "none", border: "none", cursor: "pointer",
+    padding: "4px 6px", borderRadius: "var(--radius-sm)",
+    fontFamily: "var(--font-body)", fontSize: 13,
+  },
   encBadge: { fontSize: 11, color: "var(--color-text-3)" },
 
-  // Comment count badge
   countBadge: {
     display: "inline-flex", alignItems: "center", justifyContent: "center",
     minWidth: 17, height: 17, borderRadius: "var(--radius-full)",
@@ -402,15 +448,22 @@ const s = {
     padding: "0 4px", marginLeft: 2,
     transition: "background 0.2s ease",
   },
-  newDot: {
-    position: "absolute", top: 2, right: 2,
-    width: 7, height: 7, borderRadius: "50%",
-    background: "var(--color-like-active)",
-  },
 
-  overlay: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.96)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out', margin: 0, padding: 0 },
+  overlay: {
+    position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+    backgroundColor: 'rgba(0,0,0,0.96)', zIndex: 99999,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'zoom-out',
+  },
   maximizedImage: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', userSelect: 'none' },
-  closeBtn: { position: 'absolute', top: 24, right: 24, background: 'rgba(255,255,255,0.2)', color: 'white', border: 'none', borderRadius: '50%', width: 36, height: 36, fontSize: 18, cursor: 'pointer', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  closeBtn: {
+    position: 'absolute', top: 24, right: 24,
+    background: 'rgba(255,255,255,0.2)', color: 'white',
+    border: 'none', borderRadius: '50%',
+    width: 36, height: 36, fontSize: 18, cursor: 'pointer',
+    backdropFilter: 'blur(4px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
 
   commentSection: { marginTop: 12, paddingTop: 12, borderTop: "0.5px solid var(--color-border)" },
   commentList: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 },
@@ -418,11 +471,36 @@ const s = {
   commentHeader: { display: "flex", alignItems: "center", gap: 6 },
   commentEmail: { fontSize: 12, fontWeight: 500, color: "var(--color-text-1)" },
   commentTime: { fontSize: 11, color: "var(--color-text-3)", marginLeft: "auto" },
-  commentDelete: { background: "none", border: "none", cursor: "pointer", color: "var(--color-text-3)", padding: 2, display: "flex", alignItems: "center" },
-  commentText: { fontSize: 13, color: "var(--color-text-1)", margin: "0 0 0 30px", lineHeight: 1.5, fontFamily: "var(--font-display)", fontStyle: "italic" },
+  commentDelete: {
+    background: "none", border: "none", cursor: "pointer",
+    color: "var(--color-text-3)", padding: 2,
+    display: "flex", alignItems: "center",
+  },
+  commentText: {
+    fontSize: 13, color: "var(--color-text-1)",
+    margin: "0 0 0 30px", lineHeight: 1.5,
+    fontFamily: "var(--font-display)", fontStyle: "italic",
+  },
   commentLoading: { fontSize: 12, color: "var(--color-text-3)", margin: "0 0 10px" },
-  noComments: { fontSize: 12, color: "var(--color-text-3)", fontStyle: "italic", margin: "0 0 10px", textAlign: "center" },
+  noComments: {
+    fontSize: 12, color: "var(--color-text-3)",
+    fontStyle: "italic", margin: "0 0 10px", textAlign: "center",
+  },
   commentForm: { display: "flex", alignItems: "center", gap: 8, marginTop: 4 },
-  commentInput: { flex: 1, border: "0.5px solid var(--color-border-md)", borderRadius: "var(--radius-full)", padding: "7px 14px", fontSize: 13, outline: "none", background: "var(--color-surface-2)", fontFamily: "var(--font-display)", fontStyle: "italic", color: "var(--color-text-1)" },
-  commentSubmit: { background: "var(--color-text-1)", color: "#fff", border: "none", borderRadius: "var(--radius-full)", padding: "7px 14px", fontSize: 12, cursor: "pointer", fontFamily: "var(--font-body)", fontWeight: 500, whiteSpace: "nowrap" },
+  commentInput: {
+    flex: 1,
+    border: "0.5px solid var(--color-border-md)",
+    borderRadius: "var(--radius-full)",
+    padding: "7px 14px", fontSize: 13, outline: "none",
+    background: "var(--color-surface-2)",
+    fontFamily: "var(--font-display)", fontStyle: "italic",
+    color: "var(--color-text-1)",
+  },
+  commentSubmit: {
+    background: "var(--color-text-1)", color: "#fff",
+    border: "none", borderRadius: "var(--radius-full)",
+    padding: "7px 14px", fontSize: 12,
+    cursor: "pointer", fontFamily: "var(--font-body)",
+    fontWeight: 500, whiteSpace: "nowrap",
+  },
 };

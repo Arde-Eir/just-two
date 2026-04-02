@@ -43,11 +43,10 @@ const TABS = [
 
 export function FeedPage({ user, theme, onToggleTheme }) {
   const [tab, setTab] = useState("feed");
-  const [archiveMonth, setArchiveMonth] = useState(null);
 
   const {
     posts, loading, error, refresh,
-    months, loadingMonths, monthKey, goToMonth,
+    months, monthKey, goToMonth,
     newPostAlert, clearAlert, isCurrentMonth,
   } = usePosts(true);
 
@@ -57,20 +56,41 @@ export function FeedPage({ user, theme, onToggleTheme }) {
 
       {/* Tab bar */}
       <div style={s.tabBar}>
-        {TABS.map(({ id, label, Icon }) => (
-          <button key={id}
-            style={{ ...s.tab, ...(tab === id ? s.tabActive : {}) }}
-            onClick={() => setTab(id)}>
-            <Icon /> {label}
-          </button>
-        ))}
+        {TABS.map(({ id, label, Icon }) => {
+          const isActive = tab === id;
+          return (
+            <button
+              key={id}
+              style={{
+                ...s.tab,
+                color: isActive ? "var(--color-text-1)" : "var(--color-text-3)",
+                borderBottomColor: isActive ? "var(--color-text-1)" : "transparent",
+              }}
+              onClick={() => setTab(id)}
+            >
+              <Icon /> {label}
+            </button>
+          );
+        })}
       </div>
 
       {/* New post banner */}
       {newPostAlert && (
-        <div style={s.alertBanner} onClick={() => { clearAlert(); if (tab !== "feed") setTab("feed"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+        <div
+          style={s.alertBanner}
+          onClick={() => {
+            clearAlert();
+            if (tab !== "feed") setTab("feed");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
           ✦ new post — tap to view
-          <button style={s.alertClose} onClick={e => { e.stopPropagation(); clearAlert(); }}>✕</button>
+          <button
+            style={s.alertClose}
+            onClick={e => { e.stopPropagation(); clearAlert(); }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -79,20 +99,33 @@ export function FeedPage({ user, theme, onToggleTheme }) {
         <main style={s.main}>
           {months.length > 1 && (
             <div style={s.monthStrip}>
-              {months.map(m => (
-                <button key={m.month_key}
-                  style={{ ...s.monthChip, ...(monthKey === m.month_key ? s.monthChipActive : {}) }}
-                  onClick={() => goToMonth(m.month_key)}>
-                  {m.month_label.trim().replace(" ", " '")}
-                </button>
-              ))}
+              {months.map(m => {
+                const isActive = monthKey === m.month_key;
+                return (
+                  <button
+                    key={m.month_key}
+                    style={{
+                      ...s.monthChip,
+                      background: isActive ? "var(--color-text-1)" : "var(--color-surface)",
+                      borderColor: isActive ? "var(--color-text-1)" : "var(--color-border-md)",
+                      color: isActive ? "#ffffff" : "var(--color-text-2)",
+                    }}
+                    onClick={() => goToMonth(m.month_key)}
+                  >
+                    {m.month_label.trim().replace(" ", " '")}
+                  </button>
+                );
+              })}
             </div>
           )}
 
           {isCurrentMonth && <ComposeBox user={user} onPost={refresh} />}
           {!isCurrentMonth && (
             <div style={s.archiveNotice}>
-              📅 viewing {months.find(m => m.month_key === monthKey)?.month_label?.trim() ?? monthKey} — <button style={s.linkBtn} onClick={() => goToMonth(months[0]?.month_key)}>back to current</button>
+              📅 viewing {months.find(m => m.month_key === monthKey)?.month_label?.trim() ?? monthKey} —{" "}
+              <button style={s.linkBtn} onClick={() => goToMonth(months[0]?.month_key)}>
+                back to current
+              </button>
             </div>
           )}
 
@@ -116,16 +149,9 @@ export function FeedPage({ user, theme, onToggleTheme }) {
         </main>
       )}
 
-      {tab === "tracker" && <TrackerPage user={user} />}
+      {tab === "tracker"  && <TrackerPage user={user} />}
       {tab === "wishlist" && <WishlistPage user={user} />}
-      {tab === "archive" && (
-        <ArchivePage
-          months={months}
-          selectedMonth={archiveMonth}
-          onSelectMonth={setArchiveMonth}
-          loadingMonths={loadingMonths}
-        />
-      )}
+      {tab === "archive"  && <ArchivePage />}
     </div>
   );
 }
@@ -133,23 +159,77 @@ export function FeedPage({ user, theme, onToggleTheme }) {
 const s = {
   page: { minHeight: "100vh", background: "var(--color-bg)", transition: "background 0.25s ease" },
   main: { maxWidth: 620, margin: "0 auto", padding: "20px 16px 60px" },
-  tabBar: { display: "flex", alignItems: "center", padding: "0 8px", borderBottom: "0.5px solid var(--color-border-md)", background: "var(--color-surface)", transition: "background 0.25s ease", overflowX: "auto" },
-  tab: { display: "inline-flex", alignItems: "center", gap: 6, padding: "12px 12px", background: "none", border: "none", fontSize: 13, fontFamily: "var(--font-display)", fontStyle: "italic", color: "var(--color-text-3)", cursor: "pointer", borderBottom: "2px solid transparent", marginBottom: -1, transition: "color var(--duration-fast), border-color var(--duration-fast)", whiteSpace: "nowrap", flexShrink: 0 },
-  tabActive: { color: "var(--color-text-1)", borderBottomColor: "var(--color-text-1)" },
 
-  monthStrip: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 12, marginBottom: 4, scrollbarWidth: "none" },
-  monthChip: { flexShrink: 0, padding: "5px 12px", borderRadius: "var(--radius-full)", border: "0.5px solid var(--color-border-md)", background: "var(--color-surface)", fontSize: 12, color: "var(--color-text-2)", cursor: "pointer", fontFamily: "var(--font-display)", fontStyle: "italic", transition: "all var(--duration-fast)", whiteSpace: "nowrap" },
-  monthChipActive: { background: "var(--color-text-1)", color: "var(--color-bg)", borderColor: "var(--color-text-1)" },
+  tabBar: {
+    display: "flex", alignItems: "center",
+    padding: "0 8px",
+    borderBottom: "0.5px solid var(--color-border-md)",
+    background: "var(--color-surface)",
+    transition: "background 0.25s ease",
+    overflowX: "auto",
+  },
+  tab: {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "12px 12px",
+    background: "none", border: "none",
+    borderBottom: "2px solid transparent",
+    marginBottom: -1,
+    fontSize: 13, fontFamily: "var(--font-display)", fontStyle: "italic",
+    cursor: "pointer",
+    transition: "color var(--duration-fast), border-color var(--duration-fast)",
+    whiteSpace: "nowrap", flexShrink: 0,
+  },
 
-  archiveNotice: { fontSize: 13, color: "var(--color-text-3)", marginBottom: 16, textAlign: "center", fontStyle: "italic" },
-  linkBtn: { background: "none", border: "none", color: "var(--color-accent)", cursor: "pointer", fontSize: 13, fontFamily: "inherit", textDecoration: "underline" },
+  monthStrip: {
+    display: "flex", gap: 6, overflowX: "auto",
+    paddingBottom: 12, marginBottom: 4, scrollbarWidth: "none",
+  },
+  monthChip: {
+    flexShrink: 0,
+    padding: "5px 12px",
+    borderRadius: "var(--radius-full)",
+    border: "0.5px solid",
+    fontSize: 12, fontFamily: "var(--font-display)", fontStyle: "italic",
+    cursor: "pointer",
+    transition: "all var(--duration-fast)",
+    whiteSpace: "nowrap",
+  },
+
+  archiveNotice: {
+    fontSize: 13, color: "var(--color-text-3)",
+    marginBottom: 16, textAlign: "center", fontStyle: "italic",
+  },
+  linkBtn: {
+    background: "none", border: "none",
+    color: "var(--color-accent)", cursor: "pointer",
+    fontSize: 13, fontFamily: "inherit", textDecoration: "underline",
+  },
 
   center: { display: "flex", justifyContent: "center", padding: "60px 0" },
-  empty: { textAlign: "center", padding: "60px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 },
+  empty: {
+    textAlign: "center", padding: "60px 0",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+  },
   emptyIcon: { fontSize: 32, color: "var(--color-text-3)" },
-  emptyText: { fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: 18, color: "var(--color-text-2)", margin: 0 },
+  emptyText: {
+    fontFamily: "var(--font-display)", fontStyle: "italic",
+    fontSize: 18, color: "var(--color-text-2)", margin: 0,
+  },
   emptySub: { fontSize: 13, color: "var(--color-text-3)", margin: 0 },
 
-  alertBanner: { position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "var(--color-text-1)", color: "var(--color-bg)", padding: "10px 20px", borderRadius: "var(--radius-full)", fontSize: 13, fontFamily: "var(--font-display)", fontStyle: "italic", cursor: "pointer", zIndex: 200, display: "flex", alignItems: "center", gap: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.25)", animation: "fadeUp 0.3s ease both" },
-  alertClose: { background: "none", border: "none", color: "inherit", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 },
+  alertBanner: {
+    position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+    background: "var(--color-text-1)", color: "var(--color-bg)",
+    padding: "10px 20px", borderRadius: "var(--radius-full)",
+    fontSize: 13, fontFamily: "var(--font-display)", fontStyle: "italic",
+    cursor: "pointer", zIndex: 200,
+    display: "flex", alignItems: "center", gap: 12,
+    boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+    animation: "fadeUp 0.3s ease both",
+  },
+  alertClose: {
+    background: "none", border: "none",
+    color: "inherit", cursor: "pointer",
+    fontSize: 14, padding: 0, lineHeight: 1,
+  },
 };

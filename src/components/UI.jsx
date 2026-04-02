@@ -30,16 +30,17 @@ export function Button({
   };
 
   const sizes = {
-    sm: { padding: "6px 12px", fontSize: 13 },
-    md: { padding: "9px 18px", fontSize: 14 },
-    lg: { padding: "12px 24px", fontSize: 15 },
+    sm:   { padding: "6px 12px", fontSize: 13 },
+    md:   { padding: "9px 18px", fontSize: 14 },
+    lg:   { padding: "12px 24px", fontSize: 15 },
     icon: { padding: 8, fontSize: 16, borderRadius: "var(--radius-md)" },
   };
 
   const variants = {
     primary: {
       background: "var(--color-text-1)",
-      color: "#fff",
+      // Always use --color-on-text-1 so it's readable in both themes
+      color: "var(--color-on-text-1)",
     },
     ghost: {
       background: "transparent",
@@ -114,13 +115,22 @@ export function Input({ label, id, error, style, ...rest }) {
       {label && (
         <label
           htmlFor={id}
-          style={{ display: "block", fontSize: 12, fontWeight: 500, color: "var(--color-text-2)", marginBottom: 5, letterSpacing: "0.03em" }}
+          style={{
+            display: "block",
+            fontSize: 12,
+            fontWeight: 500,
+            color: "var(--color-text-2)",
+            marginBottom: 5,
+            letterSpacing: "0.03em",
+          }}
         >
           {label}
         </label>
       )}
       <input id={id} style={inputStyle} {...rest} />
-      {error && <p style={{ fontSize: 12, color: "var(--color-danger)", marginTop: 4 }}>{error}</p>}
+      {error && (
+        <p style={{ fontSize: 12, color: "var(--color-danger)", marginTop: 4 }}>{error}</p>
+      )}
     </div>
   );
 }
@@ -186,7 +196,14 @@ export function ErrorBanner({ message, onDismiss }) {
       {onDismiss && (
         <button
           onClick={onDismiss}
-          style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+          style={{
+            background: "none",
+            border: "none",
+            color: "inherit",
+            cursor: "pointer",
+            fontSize: 16,
+            lineHeight: 1,
+          }}
           aria-label="Dismiss error"
         >
           ✕
@@ -199,7 +216,10 @@ export function ErrorBanner({ message, onDismiss }) {
 // ── CharCounter ────────────────────────────────────────────────────────────
 export function CharCounter({ current, max }) {
   const pct = current / max;
-  const color = pct > 0.9 ? "var(--color-danger)" : pct > 0.75 ? "#B87333" : "var(--color-text-3)";
+  const color =
+    pct > 0.9 ? "var(--color-danger)" :
+    pct > 0.75 ? "#B87333" :
+    "var(--color-text-3)";
   return (
     <span style={{ fontSize: 12, color, fontVariantNumeric: "tabular-nums" }}>
       {current}/{max}

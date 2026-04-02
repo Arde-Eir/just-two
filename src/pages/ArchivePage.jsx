@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from "react";
-import { fetchPostsByMonth, fetchEncryptedBlob } from "../lib/api";
+import React, { useState, useCallback, useEffect } from "react";
+import { fetchPostsByMonth, fetchPostMonths, fetchEncryptedBlob } from "../lib/api";
 import { decryptText, decryptFileToUrl } from "../lib/crypto";
 import { getSessionKeys } from "../lib/sessionKeys";
 import { loadCachedPlaintext, cachePlaintext } from "../lib/plaintextCache";
@@ -21,11 +21,17 @@ const CalendarIcon = () => (
   </svg>
 );
 
+const RefreshIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 4 23 10 17 10"/>
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+  </svg>
+);
+
 // ── Media item with download ───────────────────────────────────────────────
 function MediaItem({ post, keys }) {
   const [url, setUrl]         = useState(null);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded]   = useState(false);
 
   async function loadMedia() {
     if (url || loading || !keys?.sharedAesKey) return;
@@ -39,28 +45,37 @@ function MediaItem({ post, keys }) {
   }
 
   async function handleDownload() {
-    await loadMedia();
-    if (!url) return;
+    if (!url) await loadMedia();
+    // wait for state update — use a ref approach instead
+    let downloadUrl = url;
+    if (!downloadUrl && keys?.sharedAesKey) {
+      try {
+        const encBlob = await fetchEncryptedBlob(post.media_url);
+        downloadUrl = await decryptFileToUrl(encBlob, post.media_iv, keys.sharedAesKey, post.media_mime);
+        setUrl(downloadUrl);
+      } catch { return; }
+    }
+    if (!downloadUrl) return;
     const a = document.createElement("a");
-    const ext = post.media_mime?.split("/")[1] || "bin";
-    a.href = url;
+    const ext = post.media_mime?.split("/")[1]?.replace("jpeg", "jpg") || "bin";
+    a.href = downloadUrl;
     a.download = `memory_${new Date(post.created_at).toISOString().slice(0,10)}.${ext}`;
     a.click();
   }
 
   return (
     <div style={s.mediaItem}>
-      {/* Lazy-load thumbnail on click */}
       <div style={s.mediaThumbnail} onClick={loadMedia}>
         {loading ? (
           <div style={s.mediaPlaceholder}><Spinner size={20} /></div>
         ) : url ? (
           post.media_type === "video" ? (
-<video src={url} controls playsInline preload="auto" style={s.mediaEl} onLoadedData={() => setLoaded(true)} />          ) : (
-            <img src={url} alt="memory" style={s.mediaEl} onLoad={() => setLoaded(true)} />
+            <video src={url} controls playsInline preload="auto" style={s.mediaEl} />
+          ) : (
+            <img src={url} alt="memory" style={s.mediaEl} />
           )
         ) : (
-          <div style={s.mediaPlaceholder} onClick={loadMedia}>
+          <div style={s.mediaPlaceholder}>
             <span style={{ fontSize: 28 }}>{post.media_type === "video" ? "🎬" : "🖼️"}</span>
             <span style={s.tapLoad}>tap to load</span>
           </div>
@@ -68,9 +83,15 @@ function MediaItem({ post, keys }) {
       </div>
 
       <div style={s.mediaFooter}>
-        <div>
-          <p style={s.mediaCaption}>{post._plainContent || ""}</p>
-          <p style={s.mediaMeta}>{new Date(post.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {post._plainContent && (
+            <p style={s.mediaCaption}>{post._plainContent}</p>
+          )}
+          <p style={s.mediaMeta}>
+            {new Date(post.created_at).toLocaleDateString(undefined, {
+              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+            })}
+          </p>
         </div>
         <button style={s.downloadBtn} onClick={handleDownload} title="Download">
           <DownloadIcon />
@@ -94,87 +115,151 @@ function TextRow({ post }) {
 }
 
 // ── Archive Page ──────────────────────────────────────────────────────────
-export function ArchivePage({ months, selectedMonth, onSelectMonth, loadingMonths }) {
-  const [posts, setPosts]   = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState("");
-  const [loaded, setLoaded] = useState(false);
+export function ArchivePage() {
+  // Fetch months independently — don't rely on parent passing them
+  const [months, setMonths]       = useState([]);
+  const [loadingMonths, setLoadingMonths] = useState(true);
+  const [selectedMonth, setSelectedMonth] = useState(null);
+
+  const [posts, setPosts]         = useState([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [error, setError]         = useState("");
+  const [loaded, setLoaded]       = useState(false);
 
   const keys = getSessionKeys();
 
+  // Load month list on mount
+  const loadMonths = useCallback(async () => {
+    setLoadingMonths(true);
+    setError("");
+    try {
+      const data = await fetchPostMonths();
+      setMonths(data);
+    } catch (err) {
+      setError("Failed to load month list: " + (err.message ?? "unknown error"));
+    }
+    setLoadingMonths(false);
+  }, []);
+
+  useEffect(() => {
+    loadMonths();
+  }, [loadMonths]);
+
   const loadMonth = useCallback(async (key) => {
-    onSelectMonth(key);
-    setLoading(true); setError(""); setPosts([]); setLoaded(false);
+    setSelectedMonth(key);
+    setLoadingPosts(true);
+    setError("");
+    setPosts([]);
+    setLoaded(false);
+
     try {
       const raw = await fetchPostsByMonth(key);
-      // Decrypt text content
+
       const decrypted = await Promise.all(raw.map(async (p) => {
         const dec = { ...p, _plainContent: null };
-        if (p.content && p.content_iv && keys?.sharedAesKey) {
-          try {
-            const plain = await decryptText(p.content, p.content_iv, keys.sharedAesKey);
-            dec._plainContent = plain;
-            await cachePlaintext(p.id, plain);
-          } catch {
+        if (p.content && p.content_iv) {
+          if (keys?.sharedAesKey) {
+            try {
+              const plain = await decryptText(p.content, p.content_iv, keys.sharedAesKey);
+              dec._plainContent = plain;
+              await cachePlaintext(p.id, plain);
+            } catch {
+              dec._plainContent = (await loadCachedPlaintext(p.id)) ?? "";
+            }
+          } else {
             dec._plainContent = (await loadCachedPlaintext(p.id)) ?? "";
           }
-        } else if (p.content) {
-          dec._plainContent = (await loadCachedPlaintext(p.id)) ?? "";
         }
         return dec;
       }));
+
       setPosts(decrypted);
       setLoaded(true);
     } catch (err) {
-      setError("Failed to load this month.");
+      setError("Failed to load posts for this month: " + (err.message ?? "unknown error"));
     }
-    setLoading(false);
-  }, [keys, onSelectMonth]);
+    setLoadingPosts(false);
+  }, [keys]);
 
   const mediaPosts = posts.filter(p => p.media_url && p.media_iv && p.media_mime);
   const textPosts  = posts.filter(p => !p.media_url && p._plainContent);
 
+  const selectedMonthLabel = months.find(m => m.month_key === selectedMonth)?.month_label?.trim() ?? selectedMonth;
+
   return (
     <div style={s.page}>
       <div style={s.pageHeader}>
-        <h2 style={s.pageTitle}><CalendarIcon /> monthly archive</h2>
-        <p style={s.pageSub}>browse past months · tap media to preview · download to save</p>
+        <div>
+          <h2 style={s.pageTitle}><CalendarIcon /> monthly archive</h2>
+          <p style={s.pageSub}>browse past months · tap media to preview · download to save</p>
+        </div>
+        <button style={s.refreshBtn} onClick={loadMonths} title="Refresh month list">
+          <RefreshIcon />
+        </button>
       </div>
+
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
 
       {/* Month picker */}
       {loadingMonths ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}><Spinner size={20} /></div>
+        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+          <Spinner size={20} />
+        </div>
       ) : months.length === 0 ? (
         <p style={s.empty}>no posts yet — your archive will appear here month by month</p>
       ) : (
         <div style={s.monthGrid}>
-          {months.map(m => (
-            <button
-              key={m.month_key}
-              style={{ ...s.monthBtn, ...(selectedMonth === m.month_key ? s.monthBtnActive : {}) }}
-              onClick={() => loadMonth(m.month_key)}
-            >
-              <span style={s.monthLabel}>{m.month_label.trim()}</span>
-              <span style={s.monthCount}>{m.post_count} post{m.post_count !== 1 ? "s" : ""}</span>
-            </button>
-          ))}
+          {months.map(m => {
+            const isActive = selectedMonth === m.month_key;
+            return (
+              <button
+                key={m.month_key}
+                style={{
+                  ...s.monthBtn,
+                  ...(isActive ? s.monthBtnActive : {}),
+                }}
+                onClick={() => loadMonth(m.month_key)}
+              >
+                <span style={{
+                  ...s.monthLabel,
+                  color: isActive ? "#ffffff" : "var(--color-text-1)",
+                }}>
+                  {m.month_label.trim()}
+                </span>
+                <span style={{
+                  ...s.monthCount,
+                  color: isActive ? "rgba(255,255,255,0.75)" : "var(--color-text-3)",
+                }}>
+                  {m.post_count} post{m.post_count !== 1 ? "s" : ""}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 
-      <ErrorBanner message={error} onDismiss={() => setError("")} />
-
-      {loading && (
-        <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Spinner size={24} /></div>
+      {loadingPosts && (
+        <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}>
+          <Spinner size={24} />
+        </div>
       )}
 
-      {loaded && !loading && (
+      {loaded && !loadingPosts && (
         <>
+          <div style={s.monthHeading}>
+            <span style={s.monthHeadingText}>
+              {selectedMonthLabel} — {posts.length} post{posts.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
           {/* Media grid */}
           {mediaPosts.length > 0 && (
             <div style={s.section}>
               <h3 style={s.sectionTitle}>📸 photos & videos ({mediaPosts.length})</h3>
               <div style={s.mediaGrid}>
-                {mediaPosts.map(p => <MediaItem key={p.id} post={p} keys={keys} />)}
+                {mediaPosts.map(p => (
+                  <MediaItem key={p.id} post={p} keys={keys} />
+                ))}
               </div>
             </div>
           )}
@@ -194,15 +279,29 @@ export function ArchivePage({ months, selectedMonth, onSelectMonth, loadingMonth
           )}
         </>
       )}
+
+      {!selectedMonth && !loadingMonths && months.length > 0 && (
+        <p style={s.hintText}>👆 select a month above to browse its posts</p>
+      )}
     </div>
   );
 }
 
 const s = {
   page: { maxWidth: 620, margin: "0 auto", padding: "24px 16px 60px" },
-  pageHeader: { marginBottom: 20 },
+  pageHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20, gap: 12 },
   pageTitle: { fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: 20, color: "var(--color-text-1)", display: "flex", alignItems: "center", gap: 8, margin: 0 },
   pageSub: { fontSize: 13, color: "var(--color-text-3)", marginTop: 4 },
+  refreshBtn: {
+    background: "var(--color-surface-2)",
+    border: "0.5px solid var(--color-border-md)",
+    borderRadius: "var(--radius-md)",
+    padding: 8,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    color: "var(--color-text-2)",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
 
   monthGrid: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 24 },
   monthBtn: {
@@ -212,10 +311,14 @@ const s = {
     cursor: "pointer", transition: "all var(--duration-fast)", gap: 2,
   },
   monthBtnActive: {
-    background: "var(--color-text-1)", borderColor: "var(--color-text-1)",
+    background: "var(--color-text-1)",
+    borderColor: "var(--color-text-1)",
   },
-  monthLabel: { fontSize: 13, fontWeight: 500, color: "inherit", fontFamily: "var(--font-display)", fontStyle: "italic" },
-  monthCount: { fontSize: 11, color: "var(--color-text-3)" },
+  monthLabel: { fontSize: 13, fontWeight: 500, fontFamily: "var(--font-display)", fontStyle: "italic" },
+  monthCount: { fontSize: 11 },
+
+  monthHeading: { marginBottom: 16, paddingBottom: 10, borderBottom: "0.5px solid var(--color-border)" },
+  monthHeadingText: { fontSize: 14, fontWeight: 500, color: "var(--color-text-2)", fontFamily: "var(--font-display)", fontStyle: "italic" },
 
   section: { marginBottom: 28 },
   sectionTitle: { fontSize: 14, fontWeight: 500, color: "var(--color-text-2)", marginBottom: 12, letterSpacing: "0.02em" },
@@ -237,4 +340,5 @@ const s = {
   textMeta: { fontSize: 11, color: "var(--color-text-3)", margin: "4px 0 0" },
 
   empty: { textAlign: "center", fontSize: 14, color: "var(--color-text-3)", fontStyle: "italic", padding: "40px 0" },
+  hintText: { textAlign: "center", fontSize: 14, color: "var(--color-text-3)", fontStyle: "italic", padding: "40px 0" },
 };
